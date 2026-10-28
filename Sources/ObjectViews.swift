@@ -287,8 +287,9 @@ struct ObjectChrome: View {
     @State private var resize: CGSize = .zero
 
     var body: some View {
-        let width = max(60, o.width + resize.width)
-        let height = o.layoutHeight.map { max(24, $0 + (o.resizesHeight ? resize.height : 0)) }
+        let width = CGFloat(max(60, o.width)) + resize.width
+        let extra: CGFloat = o.resizesHeight ? resize.height : 0
+        let height: CGFloat? = o.layoutHeight.map { CGFloat(max(24, $0)) + extra }
 
         ObjectContent(o: $o, size: CGSize(width: width, height: height ?? 0), editable: editable, onChange: onChange)
             .frame(width: width, height: height, alignment: .topLeading)
