@@ -159,11 +159,6 @@ struct NoteEditorView: View {
 
             Menu {
                 Button("Text box", systemImage: ObjectKind.text.icon) { addObject(.text) }
-                Menu("Shapes", systemImage: "square.on.circle") {
-                    ForEach(ObjectKind.shapes) { kind in
-                        Button(kind.title, systemImage: kind.icon) { addObject(kind) }
-                    }
-                }
                 Button("Sticky note", systemImage: ObjectKind.sticky.icon) { addObject(.sticky) }
                 Button("Checklist", systemImage: ObjectKind.checklist.icon) { addObject(.checklist) }
                 Button("Table", systemImage: ObjectKind.table.icon) { addObject(.table) }

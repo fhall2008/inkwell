@@ -68,15 +68,18 @@ struct LibraryView: View {
         } message: { Text(importError ?? "") }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.pdf, .data]) { result in
             guard case .success(let url) = result else { return }
-            if url.pathExtension.lowercased() == "pdf" {
+            let ext = url.pathExtension.lowercased()
+            if ext == "pdf" || ext == "docx" {
                 Task {
                     let scoped = url.startAccessingSecurityScopedResource()
                     defer { if scoped { url.stopAccessingSecurityScopedResource() } }
                     do {
-                        let note = try await store.importPDF(from: url, folder: currentFolder?.id)
+                        let note = ext == "pdf"
+                            ? try await store.importPDF(from: url, folder: currentFolder?.id)
+                            : try await store.importDocx(from: url, folder: currentFolder?.id)
                         openNote = OpenNote(id: note.id)
                     } catch {
-                        importError = "That PDF couldn't be read."
+                        importError = ext == "pdf" ? "That PDF couldn't be read." : "That Word file couldn't be read. Only .docx files work, not older .doc files."
                     }
                 }
             } else {
@@ -136,7 +139,7 @@ struct LibraryView: View {
         .searchable(text: $search, prompt: "Search note titles")
         .toolbar {
             ToolbarItem {
-                Button { importing = true } label: { Label("Import PDF or backup", systemImage: "square.and.arrow.down") }
+                Button { importing = true } label: { Label("Import PDF, Word or backup", systemImage: "square.and.arrow.down") }
             }
             ToolbarItem {
                 Button { showTemplates = true } label: { Label("New note", systemImage: "plus") }

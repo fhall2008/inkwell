@@ -166,6 +166,20 @@ final class Store: ObservableObject {
         return note
     }
 
+    /// Imports a Word document: converted to pages, then treated like an imported PDF.
+    func importDocx(from url: URL, folder: UUID?) async throws -> Note {
+        let pdf = try DocxImporter.pdfData(from: url)
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).pdf")
+        try pdf.write(to: temp)
+        defer { try? FileManager.default.removeItem(at: temp) }
+        let result = try await Task.detached(priority: .userInitiated) { try PDFImporter.pages(from: temp) }.value
+        var note = Note(folderID: folder, template: .blank)
+        note.title = url.deletingPathExtension().lastPathComponent
+        note.pages = result.pages
+        update(note)
+        return note
+    }
+
     func importBackup(from url: URL) throws {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
