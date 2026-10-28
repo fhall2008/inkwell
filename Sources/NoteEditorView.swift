@@ -18,6 +18,7 @@ struct NoteEditorView: View {
     @State private var jumpTo: UUID?
     @State private var alertText: String?
     @State private var saveTask: Task<Void, Never>?
+    @State private var presenting = false
     @StateObject private var dictation = Dictation()
 
     private static let stamps = ["APPROVED", "DRAFT", "DONE", "URGENT", "CONFIDENTIAL", "REVIEWED"]
@@ -30,7 +31,10 @@ struct NoteEditorView: View {
     var body: some View {
         NavigationStack {
             GeometryReader { geo in
-                let scale = min(1, (geo.size.width - 40) / pageSize.width)
+                let fitWidth = (geo.size.width - 40) / pageSize.width
+                let fitHeight = (geo.size.height - 48) / pageSize.height
+                // Present mode shrinks a whole page to fit the screen.
+                let scale = min(1, presenting ? min(fitWidth, fitHeight) : fitWidth)
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(spacing: 24) {
@@ -60,7 +64,20 @@ struct NoteEditorView: View {
                     }
                 }
             }
-            .background(Color(red: 0.914, green: 0.898, blue: 0.859))
+            .background(presenting ? Color.black : Color(red: 0.914, green: 0.898, blue: 0.859))
+            .overlay(alignment: .topTrailing) {
+                if presenting {
+                    Button { presenting = false } label: {
+                        Label("Exit", systemImage: "xmark")
+                            .font(.footnote.weight(.semibold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(.ultraThinMaterial, in: Capsule())
+                    }
+                    .padding(16)
+                    .opacity(0.7)
+                }
+            }
             .overlay(alignment: .bottom) {
                 VStack(spacing: 8) {
                     dictationBar
@@ -69,6 +86,8 @@ struct NoteEditorView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbar }
+            .toolbar(presenting ? .hidden : .visible, for: .navigationBar)
+            .statusBarHidden(presenting)
         }
         .sheet(isPresented: $showExport) { ExportSheet(note: note) }
         .sheet(isPresented: $showPages) {
@@ -169,6 +188,10 @@ struct NoteEditorView: View {
             }
 
             Menu {
+                Button("Present", systemImage: "play.rectangle") {
+                    editMode = false
+                    presenting = true
+                }
                 Button("Pages", systemImage: "square.stack") { showPages = true }
                 Button("Add page", systemImage: "plus.square") {
                     note.pages.append(NotePage())
