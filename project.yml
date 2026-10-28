@@ -17,7 +17,11 @@ targets:
       - Assets.xcassets
     settings:
       base:
+<<<<<<< HEAD
         PRODUCT_BUNDLE_IDENTIFIER: au.com.neurofaith.inkwell   # must match the App Store Connect app
+=======
+        PRODUCT_BUNDLE_IDENTIFIER: au.com.neurofaith.inkwell   # change if you use another ID
+>>>>>>> f9e059a7ff9ea3afaeee9d5a688b112bd8992df8
         TARGETED_DEVICE_FAMILY: "2"                                  # iPad only
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_STYLE: Automatic
