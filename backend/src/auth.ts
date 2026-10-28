@@ -77,8 +77,14 @@ export async function handleAuth(request: Request, env: Env, pathname: string): 
     const code = body.invite.toUpperCase().replace(/[^A-Z0-9]/g, "");
     const invite = await env.DB.prepare("SELECT * FROM invites WHERE code_hash = ?1")
       .bind(await sha256Hex(code))
-      .first<{ code_hash: string; email: string | null; role: string; expires_at: number; used_at: number | null }>();
-    if (!invite || invite.used_at || invite.expires_at < Date.now() || (invite.email && invite.email !== email)) {
+      .first<{ code_hash: string; email: string | null; role: string; purpose: string; expires_at: number; used_at: number | null }>();
+    if (
+      !invite ||
+      invite.purpose !== "register" ||
+      invite.used_at ||
+      invite.expires_at < Date.now() ||
+      (invite.email && invite.email !== email)
+    ) {
       return fail(400, "That invite is invalid or has expired.");
     }
     const existing = await env.DB.prepare("SELECT id FROM users WHERE email = ?1").bind(email).first();
@@ -93,6 +99,46 @@ export async function handleAuth(request: Request, env: Env, pathname: string): 
     ]);
     const session = await createSession(env, id);
     return json({ ...session, user: { id, email, role: invite.role } }, 201);
+  }
+
+  // Forgotten password: an admin issues a reset code for the person's email. The person sets a new
+  // password with it, then uses their recovery key on the device to re-wrap their encryption key.
+  // The server never learns either secret, and the notes stay encrypted throughout.
+  if (pathname === "/auth/reset" && method === "POST") {
+    const body = await readJson<{ invite?: unknown; email?: unknown; salt?: unknown; loginKey?: unknown }>(request);
+    const email = normaliseEmail(body?.email);
+    if (!email || typeof body?.invite !== "string" || !isSaltLike(body.salt) || !isKeyLike(body.loginKey)) {
+      return fail(400, "Bad request");
+    }
+    if (!(await rateLimit(env, `reg:${clientIp(request)}`, 10, 3_600_000))) return fail(429, "Too many attempts.");
+
+    const code = body.invite.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const invite = await env.DB.prepare("SELECT * FROM invites WHERE code_hash = ?1")
+      .bind(await sha256Hex(code))
+      .first<{ code_hash: string; email: string | null; purpose: string; expires_at: number; used_at: number | null }>();
+    const user = await env.DB.prepare("SELECT id, email, role, status FROM users WHERE email = ?1")
+      .bind(email)
+      .first<{ id: string; email: string; role: string; status: string }>();
+    if (
+      !invite ||
+      invite.purpose !== "reset" ||
+      invite.used_at ||
+      invite.expires_at < Date.now() ||
+      invite.email !== email ||
+      !user
+    ) {
+      return fail(400, "That reset code is invalid or has expired.");
+    }
+    if (user.status !== "active") return fail(403, "This account is disabled.");
+
+    await env.DB.batch([
+      env.DB.prepare("UPDATE users SET login_hash = ?2, kdf_salt = ?3 WHERE id = ?1")
+        .bind(user.id, await loginHash(body.loginKey), body.salt),
+      env.DB.prepare("DELETE FROM sessions WHERE user_id = ?1").bind(user.id),
+      env.DB.prepare("UPDATE invites SET used_at = ?2 WHERE code_hash = ?1").bind(invite.code_hash, Date.now()),
+    ]);
+    const session = await createSession(env, user.id);
+    return json({ ...session, user: { id: user.id, email: user.email, role: user.role } });
   }
 
   if (pathname === "/auth/login" && method === "POST") {

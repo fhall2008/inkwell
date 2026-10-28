@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS invites (
   code_hash  TEXT PRIMARY KEY,
   email      TEXT,                              -- optional: restrict the invite to one address
   role       TEXT NOT NULL DEFAULT 'user',
+  purpose    TEXT NOT NULL DEFAULT 'register',  -- 'register' (new account) | 'reset' (forgotten password)
   created_at INTEGER NOT NULL,
   expires_at INTEGER NOT NULL,
   used_at    INTEGER

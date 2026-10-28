@@ -7,6 +7,7 @@
  *
  *   /auth/prelogin  POST  {email}                                -> {salt, iterations}
  *   /auth/register  POST  {invite, email, salt, loginKey}        -> {token, expires, user}
+ *   /auth/reset     POST  {invite, email, salt, loginKey}        -> {token, expires, user}  (forgotten password)
  *   /auth/login     POST  {email, loginKey}                      -> {token, expires, user}
  *   /auth/me        GET   (session)                              -> {user}
  *   /auth/logout    POST  (session)
@@ -21,7 +22,7 @@
  *     GET    /api/stats
  *
  *   /admin/...      needs "Authorization: Bearer <admin token>" (the SYNC_TOKEN secret)
- *     POST   /admin/invites          {email?, role?, days?}
+ *     POST   /admin/invites          {email?, role?, days?, purpose?: "register" | "reset"}
  *     GET    /admin/users
  *     POST   /admin/users/<id>/disable | /enable
  *     DELETE /admin/users/<id>

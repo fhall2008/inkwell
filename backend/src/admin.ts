@@ -15,18 +15,29 @@ export async function handleAdmin(request: Request, env: Env, pathname: string):
   const method = request.method;
 
   if (pathname === "/admin/invites" && method === "POST") {
-    const body = (await readJson<{ email?: unknown; role?: unknown; days?: unknown }>(request)) ?? {};
+    const body = (await readJson<{ email?: unknown; role?: unknown; days?: unknown; purpose?: unknown }>(request)) ?? {};
     const email = body.email === undefined || body.email === "" ? null : normaliseEmail(body.email);
     if (body.email !== undefined && body.email !== "" && !email) return fail(400, "Bad email");
+    const purpose = body.purpose === "reset" ? "reset" : "register";
     const role = body.role === "admin" ? "admin" : "user";
     const days = Math.min(Math.max(Number(body.days) || 7, 1), 30);
+
+    if (purpose === "reset") {
+      // A reset code is for one existing account, so it needs that account's email.
+      if (!email) return fail(400, "A reset code needs the person's email");
+      const exists = await env.DB.prepare("SELECT id FROM users WHERE email = ?1").bind(email).first();
+      if (!exists) return fail(404, "No account with that email");
+    }
+
     const code = makeCode();
     const now = Date.now();
     const expires = now + days * 86_400_000;
-    await env.DB.prepare("INSERT INTO invites(code_hash, email, role, created_at, expires_at) VALUES(?1, ?2, ?3, ?4, ?5)")
-      .bind(await sha256Hex(code.replace(/-/g, "")), email, role, now, expires)
+    await env.DB.prepare(
+      "INSERT INTO invites(code_hash, email, role, purpose, created_at, expires_at) VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+    )
+      .bind(await sha256Hex(code.replace(/-/g, "")), email, role, purpose, now, expires)
       .run();
-    return json({ code, email, role, expires }, 201);
+    return json({ code, email, role, purpose, expires }, 201);
   }
 
   if (pathname === "/admin/users" && method === "GET") {

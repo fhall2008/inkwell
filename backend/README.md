@@ -10,8 +10,9 @@ cannot read the notes: encryption happens on the devices.
    enable it (it may ask for a payment card, even if you stay inside the free allowance).
 2. **Account ID.** Dashboard > Workers & Pages. The Account ID is shown on the right-hand side.
 3. **API token.** Dashboard > My Profile > API Tokens > Create Token. Start from the
-   **Edit Cloudflare Workers** template, then add two more permissions under Account:
-   **D1: Edit** and **Workers R2 Storage: Edit**. Create it and copy the token (shown once).
+   **Edit Cloudflare Workers** template, then add three more permissions under Account:
+   **D1: Edit**, **Workers R2 Storage: Edit** and **Cloudflare Pages: Edit** (for the web portal).
+   Create it and copy the token (shown once).
 4. **Admin token.** A long random password that only you hold. It lets you create invites and manage
    accounts. Generate one in PowerShell (run it once and keep the result private):
 
@@ -45,6 +46,16 @@ Invoke-RestMethod -Method Post -Uri "https://YOUR-WORKER-ADDRESS/admin/invites" 
 It returns a `code` like `ABCD-EFGH-JKLM-NPQR`. Give it to the person. They enter the code, their email
 and a password in the app or web portal to create their account. Use `"role":"admin"` for another admin.
 Leave out `email` to let the code work for any address.
+
+**Forgotten password.** Make a reset code instead (the person's email is required):
+
+```powershell
+Invoke-RestMethod -Method Post -Uri "https://YOUR-WORKER-ADDRESS/admin/invites" -Headers @{ Authorization = "Bearer YOUR-ADMIN-TOKEN" } -ContentType "application/json" -Body '{"purpose":"reset","email":"mum@example.com","days":2}'
+```
+
+They choose "Forgot password" on the sign-in page and enter the reset code, their recovery key and a new password.
+The notes stay encrypted; the recovery key is what lets them be opened again. Without it nothing can be recovered.
+The administrator page (`/admin.html` on the web portal) does all of this with forms.
 
 Other admin calls: `GET /admin/users` (who has an account and how much space they use),
 `POST /admin/users/<id>/disable` or `/enable`, `DELETE /admin/users/<id>` (permanently deletes the

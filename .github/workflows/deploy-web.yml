@@ -1,0 +1,39 @@
+name: Deploy web portal
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - ".github/workflows/deploy-web.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set the server address (optional)
+        env:
+          INKWELL_API_URL: ${{ vars.INKWELL_API_URL }}
+        run: |
+          # If the INKWELL_API_URL repository variable is set, the sign-in screen is pre-filled with it.
+          if [ -n "$INKWELL_API_URL" ]; then
+            node -e 'require("fs").writeFileSync("web/config.js", "window.INKWELL_API = " + JSON.stringify(process.argv[1]) + ";\n")' "$INKWELL_API_URL"
+            echo "Server address set"
+          fi
+
+      - name: Create the Pages project if it doesn't exist yet
+        run: npx --yes wrangler@4 pages project create inkwell-web --production-branch=main || echo "project already exists"
+
+      - name: Deploy
+        run: npx --yes wrangler@4 pages deploy web --project-name=inkwell-web --branch=main

@@ -6,6 +6,8 @@ on:
     paths-ignore:
       - "backend/**"
       - "web/**"
+      - "docs/**"
+      - ".github/workflows/deploy-web.yml"
       - ".github/workflows/deploy-backend.yml"
   workflow_dispatch:
 
