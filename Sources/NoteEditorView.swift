@@ -14,11 +14,12 @@ struct NoteEditorView: View {
     @State private var showSaveTemplate = false
     @State private var templateName = ""
     @State private var saveTask: Task<Void, Never>?
+    @StateObject private var dictation = Dictation()
 
     init(note: Note) { _note = State(initialValue: note) }
 
     private var pageSize: CGSize { PageRenderer.pageSize }
-    private var hasImages: Bool { note.pages.contains { !$0.images.isEmpty } }
+    private var hasObjects: Bool { note.pages.contains { !$0.images.isEmpty || !$0.texts.isEmpty } }
 
     var body: some View {
         NavigationStack {
@@ -44,6 +45,7 @@ struct NoteEditorView: View {
                 }
             }
             .background(Color(red: 0.914, green: 0.898, blue: 0.859))
+            .overlay(alignment: .bottom) { dictationBar }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbar }
         }
@@ -72,6 +74,7 @@ struct NoteEditorView: View {
             saveTask?.cancel()
             store.update(note)
             InkSession.shared.hide()
+            dictation.cancel()
         }
     }
 
@@ -104,10 +107,16 @@ struct NoteEditorView: View {
             Button { showCamera = true } label: { Image(systemName: "camera") }
                 .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
                 .accessibilityLabel("Take photo")
-            if hasImages {
+            Button { insertTextBox("") } label: { Image(systemName: "textformat") }
+                .accessibilityLabel("Add text box")
+            Button {
+                if dictation.isListening { dictation.cancel() } else { dictation.start() }
+            } label: { Image(systemName: dictation.isListening ? "mic.fill" : "mic") }
+                .accessibilityLabel("Dictate text")
+            if hasObjects {
                 Toggle(isOn: $moveImages) { Image(systemName: "arrow.up.and.down.and.arrow.left.and.right") }
                     .toggleStyle(.button)
-                    .accessibilityLabel("Move and resize images")
+                    .accessibilityLabel("Edit images and text")
             }
 
             Menu {
@@ -154,6 +163,47 @@ struct NoteEditorView: View {
         scheduleSave()
     }
 
+    private func insertTextBox(_ text: String) {
+        let page = activeIndex()
+        let y = min(120 + Double(note.pages[page].texts.count) * 80, 950)
+        note.pages[page].texts.append(PlacedText(text: text, x: 60, y: y, width: pageSize.width - 120))
+        moveImages = true   // editing mode lets you type and drag straight away
+        scheduleSave()
+    }
+
+    private func finishDictation() {
+        let text = dictation.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        dictation.stop()
+        if !text.isEmpty { insertTextBox(text) }
+    }
+
+    @ViewBuilder
+    private var dictationBar: some View {
+        if dictation.isListening || dictation.errorText != nil {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Image(systemName: dictation.isListening ? "waveform" : "exclamationmark.triangle")
+                    Text(dictation.isListening ? "Listening…" : "Dictation").font(.headline)
+                    Spacer()
+                }
+                Text(dictation.errorText ?? (dictation.transcript.isEmpty ? "Start speaking" : dictation.transcript))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .foregroundStyle(dictation.transcript.isEmpty ? .secondary : .primary)
+                HStack {
+                    Button(dictation.isListening ? "Cancel" : "OK", role: .cancel) { dictation.cancel() }
+                    Spacer()
+                    if dictation.isListening {
+                        Button("Insert as text", action: finishDictation).buttonStyle(.borderedProminent)
+                    }
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: 640)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+            .padding(20)
+        }
+    }
+
     private func deleteActivePage() {
         guard note.pages.count > 1 else { return }
         note.pages.remove(at: activeIndex())
@@ -191,12 +241,75 @@ struct PageView: View {
                     onChange: onChange
                 )
             }
+            ForEach($page.texts) { $placed in
+                PlacedTextView(
+                    placed: $placed,
+                    editable: moveImages,
+                    onDelete: {
+                        page.texts.removeAll { $0.id == placed.id }
+                        onChange()
+                    },
+                    onChange: onChange
+                )
+            }
             InkCanvas(data: $page.drawing, allowsInput: !moveImages, onActivate: onActivate, onChange: onChange)
         }
         .coordinateSpace(name: "page")
         .background(Color.white)
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .shadow(color: .black.opacity(0.14), radius: 8, y: 2)
+    }
+}
+
+struct PlacedTextView: View {
+    @Binding var placed: PlacedText
+    let editable: Bool
+    var onDelete: () -> Void
+    var onChange: () -> Void
+
+    @State private var drag: CGSize = .zero
+
+    var body: some View {
+        Group {
+            if editable {
+                TextField("Type here", text: $placed.text, axis: .vertical)
+                    .onChange(of: placed.text) { onChange() }
+            } else {
+                Text(placed.text)
+            }
+        }
+        .font(.system(size: 18))
+        .foregroundStyle(Theme.ink)
+        .frame(width: placed.width, alignment: .leading)
+        .overlay {
+            if editable { Rectangle().stroke(Theme.accent, style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])) }
+        }
+        .overlay(alignment: .topTrailing) {
+            if editable {
+                Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 28)
+                    .background(Theme.accent, in: Capsule())
+                    .offset(y: -32)
+                    .gesture(
+                        DragGesture(coordinateSpace: .named("page"))
+                            .onChanged { drag = $0.translation }
+                            .onEnded {
+                                placed.x += $0.translation.width
+                                placed.y += $0.translation.height
+                                drag = .zero
+                                onChange()
+                            }
+                    )
+                    .accessibilityLabel("Drag text box")
+            }
+        }
+        .contextMenu {
+            Button("Delete text box", systemImage: "trash", role: .destructive, action: onDelete)
+        }
+        .allowsHitTesting(editable)
+        .offset(x: placed.x + drag.width, y: placed.y + drag.height)
     }
 }
 

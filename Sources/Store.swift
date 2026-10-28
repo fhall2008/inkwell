@@ -101,8 +101,8 @@ final class Store: ObservableObject {
         notes.removeAll { $0.id == note.id }
         let url = Paths.notes.appendingPathComponent("\(note.id.uuidString).json")
         io.async { try? FileManager.default.removeItem(at: url) }
-        let stillUsed = Set(notes.flatMap { $0.pages.flatMap { $0.images.map(\.file) } })
-        for file in Set(note.pages.flatMap { $0.images.map(\.file) }) where !stillUsed.contains(file) {
+        let stillUsed = notes.reduce(into: Set<String>()) { $0.formUnion($1.imageFiles) }
+        for file in note.imageFiles where !stillUsed.contains(file) {
             try? FileManager.default.removeItem(at: Paths.images.appendingPathComponent(file))
         }
     }
@@ -154,6 +154,16 @@ final class Store: ObservableObject {
         let name = "\(UUID().uuidString).jpg"
         do { try data.write(to: Paths.images.appendingPathComponent(name)) } catch { return nil }
         return name
+    }
+
+    /// Imports a PDF as a new note, one page per PDF page, ready to annotate.
+    func importPDF(from url: URL, folder: UUID?) async throws -> Note {
+        let result = try await Task.detached(priority: .userInitiated) { try PDFImporter.pages(from: url) }.value
+        var note = Note(folderID: folder, template: .blank)
+        note.title = result.title
+        note.pages = result.pages
+        update(note)
+        return note
     }
 
     func importBackup(from url: URL) throws {

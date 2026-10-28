@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 enum SidebarItem: Hashable {
     case all
@@ -65,8 +66,20 @@ struct LibraryView: View {
         .alert("Import failed", isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) {
             Button("OK") {}
         } message: { Text(importError ?? "") }
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.data]) { result in
-            if case .success(let url) = result {
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.pdf, .data]) { result in
+            guard case .success(let url) = result else { return }
+            if url.pathExtension.lowercased() == "pdf" {
+                Task {
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                    do {
+                        let note = try await store.importPDF(from: url, folder: currentFolder?.id)
+                        openNote = OpenNote(id: note.id)
+                    } catch {
+                        importError = "That PDF couldn't be read."
+                    }
+                }
+            } else {
                 do { try store.importBackup(from: url) } catch { importError = "That file is not an Inkwell backup." }
             }
         }
@@ -123,7 +136,7 @@ struct LibraryView: View {
         .searchable(text: $search, prompt: "Search note titles")
         .toolbar {
             ToolbarItem {
-                Button { importing = true } label: { Label("Import backup", systemImage: "square.and.arrow.down") }
+                Button { importing = true } label: { Label("Import PDF or backup", systemImage: "square.and.arrow.down") }
             }
             ToolbarItem {
                 Button { showTemplates = true } label: { Label("New note", systemImage: "plus") }

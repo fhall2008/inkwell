@@ -14,7 +14,8 @@ UI design: see the "Inkwell iPad Notes" canvas made with Claude Design.
 
 Written without access to a Mac, so it has **not been compiled yet**. Expect the first
 CI run to surface a few compile errors; paste the log back and they get fixed quickly.
-Not in v1: text boxes, searching inside handwriting (search is by title only).
+Import a PDF from the library's Import button to annotate it. The A (text) and mic buttons in
+the editor add typed or dictated text boxes. Not in v1: searching inside handwriting (search is by title only).
 
 ## Build to TestFlight from GitHub (no Mac needed)
 

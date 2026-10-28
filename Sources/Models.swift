@@ -22,10 +22,34 @@ struct PlacedImage: Identifiable, Codable, Hashable {
     var height: Double
 }
 
+/// A typed or dictated block of text placed on a page.
+struct PlacedText: Identifiable, Codable, Hashable {
+    var id = UUID()
+    var text: String
+    var x: Double
+    var y: Double
+    var width: Double = 360
+}
+
 struct NotePage: Identifiable, Codable {
     var id = UUID()
     var drawing = Data()
     var images: [PlacedImage] = []
+    var texts: [PlacedText] = []
+    /// Image file shown in place of the template, e.g. an imported PDF page.
+    var background: String?
+
+    init() {}
+
+    // Tolerant decoding so notes saved by earlier versions still open.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        drawing = try c.decodeIfPresent(Data.self, forKey: .drawing) ?? Data()
+        images = try c.decodeIfPresent([PlacedImage].self, forKey: .images) ?? []
+        texts = try c.decodeIfPresent([PlacedText].self, forKey: .texts) ?? []
+        background = try c.decodeIfPresent(String.self, forKey: .background)
+    }
 }
 
 struct Note: Identifiable, Codable {
@@ -35,6 +59,11 @@ struct Note: Identifiable, Codable {
     var template: TemplateKind = .ruled
     var pages: [NotePage] = [NotePage()]
     var modified = Date()
+
+    /// Every image file this note depends on.
+    var imageFiles: Set<String> {
+        Set(pages.flatMap { page in page.images.map(\.file) + [page.background].compactMap { $0 } })
+    }
 }
 
 /// A page the user saved as a reusable template (background style plus its ink).

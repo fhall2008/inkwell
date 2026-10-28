@@ -107,7 +107,7 @@ enum Exporter {
 
         case .backup:
             var images: [String: Data] = [:]
-            for file in Set(note.pages.flatMap { $0.images.map(\.file) }) {
+            for file in note.imageFiles {
                 images[file] = try? Data(contentsOf: Paths.images.appendingPathComponent(file))
             }
             let url = dir.appendingPathComponent("\(base).inkwell")
@@ -140,13 +140,15 @@ enum Exporter {
     private static func pageTexts(_ note: Note) -> [String] {
         note.pages.map { page in
             let img = PageRenderer.render(note: note, page: page, scale: 2, includeTemplate: false, includeImages: false)
-            guard let cg = img.cgImage else { return "" }
+            let typed = page.texts.map(\.text).filter { !$0.isEmpty }.joined(separator: "\n")
+            guard let cg = img.cgImage else { return typed }
             let request = VNRecognizeTextRequest()
             request.recognitionLevel = .accurate
             request.usesLanguageCorrection = true
             try? VNImageRequestHandler(cgImage: cg).perform([request])
             let observations = (request.results ?? []).sorted { $0.boundingBox.midY > $1.boundingBox.midY }
-            return observations.compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+            let handwriting = observations.compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+            return [typed, handwriting].filter { !$0.isEmpty }.joined(separator: "\n")
         }
     }
 
