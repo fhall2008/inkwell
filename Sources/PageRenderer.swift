@@ -29,18 +29,7 @@ enum PageRenderer {
                     guard let img = ImageCache.image(placed.file) else { continue }
                     img.draw(in: CGRect(x: placed.x, y: placed.y, width: placed.width, height: placed.height))
                 }
-                let textAttributes: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.systemFont(ofSize: 18),
-                    .foregroundColor: UIColor(red: 0.106, green: 0.141, blue: 0.188, alpha: 1),
-                ]
-                for t in page.texts where !t.text.isEmpty {
-                    (t.text as NSString).draw(
-                        with: CGRect(x: t.x, y: t.y, width: t.width, height: 2000),
-                        options: .usesLineFragmentOrigin,
-                        attributes: textAttributes,
-                        context: nil
-                    )
-                }
+                for object in page.objects { ObjectDrawing.draw(object) }
             }
             if let drawing = try? PKDrawing(data: page.drawing), !drawing.bounds.isEmpty {
                 // Render ink with light-mode colours so it matches the paper.

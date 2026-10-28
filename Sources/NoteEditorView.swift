@@ -6,50 +6,74 @@ struct NoteEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var note: Note
     @State private var activePageID: UUID?
-    @State private var moveImages = false
+    @State private var editMode = false
+    @State private var selectedID: UUID?
     @State private var photoItem: PhotosPickerItem?
     @State private var showCamera = false
     @State private var showExport = false
+    @State private var showPages = false
     @State private var showTemplateMenu = false
     @State private var showSaveTemplate = false
     @State private var templateName = ""
+    @State private var jumpTo: UUID?
+    @State private var alertText: String?
     @State private var saveTask: Task<Void, Never>?
     @StateObject private var dictation = Dictation()
+
+    private static let stamps = ["APPROVED", "DRAFT", "DONE", "URGENT", "CONFIDENTIAL", "REVIEWED"]
 
     init(note: Note) { _note = State(initialValue: note) }
 
     private var pageSize: CGSize { PageRenderer.pageSize }
-    private var hasObjects: Bool { note.pages.contains { !$0.images.isEmpty || !$0.texts.isEmpty } }
+    private var hasObjects: Bool { note.pages.contains { !$0.images.isEmpty || !$0.objects.isEmpty } }
 
     var body: some View {
         NavigationStack {
             GeometryReader { geo in
                 let scale = min(1, (geo.size.width - 40) / pageSize.width)
-                ScrollView {
-                    VStack(spacing: 24) {
-                        ForEach($note.pages) { $page in
-                            PageView(
-                                page: $page,
-                                template: note.template,
-                                moveImages: moveImages,
-                                onActivate: { activePageID = page.id },
-                                onChange: scheduleSave
-                            )
-                            .frame(width: pageSize.width, height: pageSize.height)
-                            .scaleEffect(scale, anchor: .top)
-                            .frame(width: pageSize.width * scale, height: pageSize.height * scale)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 24) {
+                            ForEach($note.pages) { $page in
+                                PageView(
+                                    page: $page,
+                                    template: note.template,
+                                    editMode: editMode,
+                                    selectedID: selectedID,
+                                    onSelect: { selectedID = $0 },
+                                    onActivate: { activePageID = page.id },
+                                    onChange: scheduleSave
+                                )
+                                .frame(width: pageSize.width, height: pageSize.height)
+                                .scaleEffect(scale, anchor: .top)
+                                .frame(width: pageSize.width * scale, height: pageSize.height * scale)
+                                .id(page.id)
+                            }
                         }
+                        .padding(.vertical, 24)
+                        .frame(maxWidth: .infinity)
                     }
-                    .padding(.vertical, 24)
-                    .frame(maxWidth: .infinity)
+                    .onChange(of: jumpTo) { _, id in
+                        guard let id else { return }
+                        withAnimation { proxy.scrollTo(id, anchor: .top) }
+                        jumpTo = nil
+                    }
                 }
             }
             .background(Color(red: 0.914, green: 0.898, blue: 0.859))
-            .overlay(alignment: .bottom) { dictationBar }
+            .overlay(alignment: .bottom) {
+                VStack(spacing: 8) {
+                    dictationBar
+                    inspector
+                }
+            }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbar }
         }
         .sheet(isPresented: $showExport) { ExportSheet(note: note) }
+        .sheet(isPresented: $showPages) {
+            PageManagerSheet(note: $note, onJump: { jumpTo = $0 }, onChange: scheduleSave)
+        }
         .fullScreenCover(isPresented: $showCamera) { CameraPicker(onImage: insert).ignoresSafeArea() }
         .confirmationDialog("Change template", isPresented: $showTemplateMenu) {
             ForEach(TemplateKind.allCases) { kind in
@@ -61,6 +85,9 @@ struct NoteEditorView: View {
             Button("Save") { saveAsTemplate() }
             Button("Cancel", role: .cancel) {}
         }
+        .alert("Inkwell", isPresented: Binding(get: { alertText != nil }, set: { if !$0 { alertText = nil } })) {
+            Button("OK") {}
+        } message: { Text(alertText ?? "") }
         .onChange(of: photoItem) { _, item in
             guard let item else { return }
             Task {
@@ -70,6 +97,7 @@ struct NoteEditorView: View {
                 photoItem = nil
             }
         }
+        .onChange(of: editMode) { _, on in if !on { selectedID = nil } }
         .onDisappear {
             saveTask?.cancel()
             store.update(note)
@@ -77,6 +105,8 @@ struct NoteEditorView: View {
             dictation.cancel()
         }
     }
+
+    // MARK: Toolbar
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
@@ -107,23 +137,44 @@ struct NoteEditorView: View {
             Button { showCamera = true } label: { Image(systemName: "camera") }
                 .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
                 .accessibilityLabel("Take photo")
-            Button { insertTextBox("") } label: { Image(systemName: "textformat") }
-                .accessibilityLabel("Add text box")
+
+            Menu {
+                Button("Text box", systemImage: ObjectKind.text.icon) { addObject(.text) }
+                Menu("Shapes", systemImage: "square.on.circle") {
+                    ForEach(ObjectKind.shapes) { kind in
+                        Button(kind.title, systemImage: kind.icon) { addObject(kind) }
+                    }
+                }
+                Button("Sticky note", systemImage: ObjectKind.sticky.icon) { addObject(.sticky) }
+                Button("Checklist", systemImage: ObjectKind.checklist.icon) { addObject(.checklist) }
+                Button("Table", systemImage: ObjectKind.table.icon) { addObject(.table) }
+                Menu("Stamp", systemImage: ObjectKind.stamp.icon) {
+                    ForEach(Self.stamps, id: \.self) { s in Button(s) { addObject(.stamp, text: s) } }
+                    Button(Date.now.formatted(date: .abbreviated, time: .omitted)) {
+                        addObject(.stamp, text: Date.now.formatted(date: .abbreviated, time: .omitted))
+                    }
+                }
+            } label: { Image(systemName: "plus.square.on.square") }
+                .accessibilityLabel("Insert")
+
             Button {
                 if dictation.isListening { dictation.cancel() } else { dictation.start() }
             } label: { Image(systemName: dictation.isListening ? "mic.fill" : "mic") }
                 .accessibilityLabel("Dictate text")
+
             if hasObjects {
-                Toggle(isOn: $moveImages) { Image(systemName: "arrow.up.and.down.and.arrow.left.and.right") }
+                Toggle(isOn: $editMode) { Image(systemName: "arrow.up.and.down.and.arrow.left.and.right") }
                     .toggleStyle(.button)
-                    .accessibilityLabel("Edit images and text")
+                    .accessibilityLabel("Edit images and objects")
             }
 
             Menu {
+                Button("Pages", systemImage: "square.stack") { showPages = true }
                 Button("Add page", systemImage: "plus.square") {
                     note.pages.append(NotePage())
                     scheduleSave()
                 }
+                Button("Handwriting to text", systemImage: "text.viewfinder") { convertHandwriting() }
                 Button("Change template", systemImage: "square.grid.2x2") { showTemplateMenu = true }
                 Button("Save page as template", systemImage: "square.and.arrow.down") {
                     templateName = ""
@@ -138,43 +189,17 @@ struct NoteEditorView: View {
         }
     }
 
-    // MARK: Actions
+    // MARK: Bottom bars
 
-    private func scheduleSave() {
-        saveTask?.cancel()
-        saveTask = Task {
-            try? await Task.sleep(for: .seconds(0.8))
-            guard !Task.isCancelled else { return }
-            store.update(note)
+    @ViewBuilder
+    private var inspector: some View {
+        if editMode, let id = selectedID, let current = findObject(id) {
+            ObjectInspector(
+                o: Binding(get: { findObject(id) ?? current }, set: { setObject($0) }),
+                onDuplicate: { duplicateObject(id) },
+                onDelete: { deleteObject(id) }
+            )
         }
-    }
-
-    private func activeIndex() -> Int {
-        note.pages.firstIndex { $0.id == activePageID } ?? 0
-    }
-
-    private func insert(_ image: UIImage) {
-        guard let file = store.saveImage(image) else { return }
-        let w = min(320, Double(image.size.width))
-        let h = w * Double(image.size.height / image.size.width)
-        let placed = PlacedImage(file: file, x: (pageSize.width - w) / 2, y: 200, width: w, height: h)
-        note.pages[activeIndex()].images.append(placed)
-        moveImages = true   // let the user position it straight away
-        scheduleSave()
-    }
-
-    private func insertTextBox(_ text: String) {
-        let page = activeIndex()
-        let y = min(120 + Double(note.pages[page].texts.count) * 80, 950)
-        note.pages[page].texts.append(PlacedText(text: text, x: 60, y: y, width: pageSize.width - 120))
-        moveImages = true   // editing mode lets you type and drag straight away
-        scheduleSave()
-    }
-
-    private func finishDictation() {
-        let text = dictation.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        dictation.stop()
-        if !text.isEmpty { insertTextBox(text) }
     }
 
     @ViewBuilder
@@ -204,6 +229,23 @@ struct NoteEditorView: View {
         }
     }
 
+    // MARK: Saving
+
+    private func scheduleSave() {
+        saveTask?.cancel()
+        saveTask = Task {
+            try? await Task.sleep(for: .seconds(0.8))
+            guard !Task.isCancelled else { return }
+            store.update(note)
+        }
+    }
+
+    // MARK: Pages
+
+    private func activeIndex() -> Int {
+        note.pages.firstIndex { $0.id == activePageID } ?? 0
+    }
+
     private func deleteActivePage() {
         guard note.pages.count > 1 else { return }
         note.pages.remove(at: activeIndex())
@@ -216,6 +258,92 @@ struct NoteEditorView: View {
         guard !name.isEmpty else { return }
         store.saveTemplate(name: name, from: note, page: note.pages[activeIndex()])
     }
+
+    // MARK: Images
+
+    private func insert(_ image: UIImage) {
+        guard let file = store.saveImage(image) else { return }
+        let w = min(320, Double(image.size.width))
+        let h = w * Double(image.size.height / image.size.width)
+        let placed = PlacedImage(file: file, x: (pageSize.width - w) / 2, y: 200, width: w, height: h)
+        note.pages[activeIndex()].images.append(placed)
+        editMode = true   // let the user position it straight away
+        scheduleSave()
+    }
+
+    // MARK: Objects
+
+    private func addObject(_ kind: ObjectKind, text: String = "") {
+        var object = PageObject.make(kind, text: text)
+        let page = activeIndex()
+        let offset = Double(note.pages[page].objects.count % 8) * 36
+        object.x += offset
+        object.y += offset
+        note.pages[page].objects.append(object)
+        editMode = true
+        selectedID = object.id
+        scheduleSave()
+    }
+
+    private func findObject(_ id: UUID) -> PageObject? {
+        for page in note.pages {
+            if let o = page.objects.first(where: { $0.id == id }) { return o }
+        }
+        return nil
+    }
+
+    private func setObject(_ object: PageObject) {
+        for p in note.pages.indices {
+            if let i = note.pages[p].objects.firstIndex(where: { $0.id == object.id }) {
+                note.pages[p].objects[i] = object
+                scheduleSave()
+                return
+            }
+        }
+    }
+
+    private func duplicateObject(_ id: UUID) {
+        for p in note.pages.indices {
+            if var copy = note.pages[p].objects.first(where: { $0.id == id }) {
+                copy.id = UUID()
+                copy.x += 24
+                copy.y += 24
+                note.pages[p].objects.append(copy)
+                selectedID = copy.id
+                scheduleSave()
+                return
+            }
+        }
+    }
+
+    private func deleteObject(_ id: UUID) {
+        for p in note.pages.indices { note.pages[p].objects.removeAll { $0.id == id } }
+        selectedID = nil
+        scheduleSave()
+    }
+
+    // MARK: Speech and handwriting
+
+    private func finishDictation() {
+        let text = dictation.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        dictation.stop()
+        if !text.isEmpty { addObject(.text, text: text) }
+    }
+
+    private func convertHandwriting() {
+        let snapshot = note
+        let page = snapshot.pages[activeIndex()]
+        Task {
+            let text = await Task.detached(priority: .userInitiated) {
+                Recognizer.text(in: PageRenderer.render(note: snapshot, page: page, scale: 2, includeTemplate: false, includeImages: false))
+            }.value
+            if text.isEmpty {
+                alertText = "No handwriting was found on this page."
+            } else {
+                addObject(.text, text: text)
+            }
+        }
+    }
 }
 
 // MARK: - Page
@@ -223,17 +351,24 @@ struct NoteEditorView: View {
 struct PageView: View {
     @Binding var page: NotePage
     let template: TemplateKind
-    let moveImages: Bool
+    let editMode: Bool
+    let selectedID: UUID?
+    var onSelect: (UUID?) -> Void
     var onActivate: () -> Void
     var onChange: () -> Void
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            Image(uiImage: template.image).resizable()
+            Image(uiImage: page.background.flatMap { ImageCache.image($0) } ?? template.image).resizable()
+            if editMode {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { onSelect(nil) }
+            }
             ForEach($page.images) { $placed in
                 PlacedImageView(
                     placed: $placed,
-                    editable: moveImages,
+                    editable: editMode,
                     onDelete: {
                         page.images.removeAll { $0.id == placed.id }
                         onChange()
@@ -241,75 +376,35 @@ struct PageView: View {
                     onChange: onChange
                 )
             }
-            ForEach($page.texts) { $placed in
-                PlacedTextView(
-                    placed: $placed,
-                    editable: moveImages,
+            ForEach($page.objects) { $object in
+                ObjectChrome(
+                    o: $object,
+                    editable: editMode,
+                    selected: selectedID == object.id,
+                    onSelect: { onSelect(object.id) },
+                    onDuplicate: {
+                        var copy = object
+                        copy.id = UUID()
+                        copy.x += 24
+                        copy.y += 24
+                        page.objects.append(copy)
+                        onSelect(copy.id)
+                        onChange()
+                    },
                     onDelete: {
-                        page.texts.removeAll { $0.id == placed.id }
+                        page.objects.removeAll { $0.id == object.id }
+                        onSelect(nil)
                         onChange()
                     },
                     onChange: onChange
                 )
             }
-            InkCanvas(data: $page.drawing, allowsInput: !moveImages, onActivate: onActivate, onChange: onChange)
+            InkCanvas(data: $page.drawing, allowsInput: !editMode, onActivate: onActivate, onChange: onChange)
         }
         .coordinateSpace(name: "page")
         .background(Color.white)
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .shadow(color: .black.opacity(0.14), radius: 8, y: 2)
-    }
-}
-
-struct PlacedTextView: View {
-    @Binding var placed: PlacedText
-    let editable: Bool
-    var onDelete: () -> Void
-    var onChange: () -> Void
-
-    @State private var drag: CGSize = .zero
-
-    var body: some View {
-        Group {
-            if editable {
-                TextField("Type here", text: $placed.text, axis: .vertical)
-                    .onChange(of: placed.text) { onChange() }
-            } else {
-                Text(placed.text)
-            }
-        }
-        .font(.system(size: 18))
-        .foregroundStyle(Theme.ink)
-        .frame(width: placed.width, alignment: .leading)
-        .overlay {
-            if editable { Rectangle().stroke(Theme.accent, style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])) }
-        }
-        .overlay(alignment: .topTrailing) {
-            if editable {
-                Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 44, height: 28)
-                    .background(Theme.accent, in: Capsule())
-                    .offset(y: -32)
-                    .gesture(
-                        DragGesture(coordinateSpace: .named("page"))
-                            .onChanged { drag = $0.translation }
-                            .onEnded {
-                                placed.x += $0.translation.width
-                                placed.y += $0.translation.height
-                                drag = .zero
-                                onChange()
-                            }
-                    )
-                    .accessibilityLabel("Drag text box")
-            }
-        }
-        .contextMenu {
-            Button("Delete text box", systemImage: "trash", role: .destructive, action: onDelete)
-        }
-        .allowsHitTesting(editable)
-        .offset(x: placed.x + drag.width, y: placed.y + drag.height)
     }
 }
 

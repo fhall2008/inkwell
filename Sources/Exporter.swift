@@ -140,7 +140,7 @@ enum Exporter {
     private static func pageTexts(_ note: Note) -> [String] {
         note.pages.map { page in
             let img = PageRenderer.render(note: note, page: page, scale: 2, includeTemplate: false, includeImages: false)
-            let typed = page.texts.map(\.text).filter { !$0.isEmpty }.joined(separator: "\n")
+            let typed = page.objects.compactMap(\.plainText).joined(separator: "\n")
             guard let cg = img.cgImage else { return typed }
             let request = VNRecognizeTextRequest()
             request.recognitionLevel = .accurate
