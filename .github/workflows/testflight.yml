@@ -3,6 +3,10 @@ name: Build and upload to TestFlight
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "backend/**"
+      - "web/**"
+      - ".github/workflows/deploy-backend.yml"
   workflow_dispatch:
 
 jobs:

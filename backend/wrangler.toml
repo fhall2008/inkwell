@@ -1,0 +1,17 @@
+name = "inkwell-sync"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+# The deploy workflow replaces this placeholder with the real database ID.
+[[d1_databases]]
+binding = "DB"
+database_name = "inkwell"
+database_id = "REPLACE_WITH_D1_ID"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "inkwell-notes"
+
+# Nightly clean-up at 17:00 UTC (3-4am in Sydney).
+[triggers]
+crons = ["0 17 * * *"]
