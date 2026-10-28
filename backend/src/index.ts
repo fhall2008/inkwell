@@ -31,7 +31,7 @@
 import { handleAdmin, purgeUser } from "./admin";
 import { authenticate, handleAuth } from "./auth";
 import { blobKey, handleSync } from "./sync";
-import { CORS, Env, fail } from "./util";
+import { CORS, Env, fail, isAdmin, json } from "./util";
 
 const PURGE_AFTER_DAYS = 30;
 
@@ -97,6 +97,10 @@ export default {
       return await route(request, env, url);
     } catch (error) {
       console.error(error);
+      // Only the administrator gets the reason, to make problems easy to diagnose.
+      if (url.pathname.startsWith("/admin/") && (await isAdmin(request, env))) {
+        return json({ error: "Server error", detail: String(error) }, 500);
+      }
       return fail(500, "Server error");
     }
   },

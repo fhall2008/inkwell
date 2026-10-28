@@ -31,7 +31,8 @@ export class Api {
     if (!res.ok) {
       let message = res.statusText || 'Request failed';
       try {
-        message = (await res.json()).error || message;
+        const body = await res.json();
+        message = (body.error || message) + (body.detail ? ` (${body.detail})` : '');
       } catch {
         /* not JSON */
       }
