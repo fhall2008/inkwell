@@ -16,7 +16,7 @@ and pictures. Notes are encrypted in the browser before they are sent to the syn
 ## Deploying
 
 The **Deploy web portal** workflow publishes this folder to Cloudflare Pages as `inkwell-web`
-(address: `https://inkwell-web.pages.dev`). It needs the same GitHub secrets as the backend, and the Cloudflare
+(address: `https://inkwell-web-d4k.pages.dev`; Cloudflare added the `-d4k` because the plain name was taken). It needs the same GitHub secrets as the backend, and the Cloudflare
 API token must also include **Cloudflare Pages: Edit**.
 
 Optional: add a repository **variable** (Settings > Secrets and variables > Actions > Variables) called
