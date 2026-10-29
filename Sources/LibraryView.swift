@@ -12,6 +12,9 @@ struct OpenNote: Identifiable {
 
 struct LibraryView: View {
     @EnvironmentObject private var store: Store
+    @EnvironmentObject private var account: AccountManager
+    @EnvironmentObject private var sync: SyncEngine
+    @State private var showAccount = false
     @State private var selection: SidebarItem? = .all
     @State private var search = ""
     @State private var showTemplates = false
@@ -42,6 +45,9 @@ struct LibraryView: View {
             sidebar
         } detail: {
             detail
+        }
+        .sheet(isPresented: $showAccount) {
+            if account.state == .signedIn { AccountView() } else { AuthView() }
         }
         .sheet(isPresented: $showTemplates) {
             TemplatePickerView(folderID: currentFolder?.id) { note in
@@ -138,6 +144,12 @@ struct LibraryView: View {
         .navigationTitle(currentFolder?.name ?? "All notes")
         .searchable(text: $search, prompt: "Search note titles")
         .toolbar {
+            ToolbarItem {
+                Button { showAccount = true } label: {
+                    Label(account.state == .signedIn ? "Sync: \(sync.summary)" : "Sign in to sync", systemImage: sync.icon)
+                }
+                .accessibilityLabel(account.state == .signedIn ? "Account and sync" : "Sign in to sync")
+            }
             ToolbarItem {
                 Button { importing = true } label: { Label("Import PDF, Word or backup", systemImage: "square.and.arrow.down") }
             }

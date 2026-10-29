@@ -55,7 +55,8 @@ jobs:
             -authenticationKeyID "$KEY_ID" \
             -authenticationKeyIssuerID "$ISSUER_ID" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
-            CURRENT_PROJECT_VERSION="${{ github.run_number }}"
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            INKWELL_SERVER_URL="${{ vars.INKWELL_API_URL }}"
 
       - name: Export and upload to App Store Connect
         env:

@@ -12,6 +12,9 @@ iPad Air notes app for Apple Pencil Pro. SwiftUI + PencilKit, iPadOS 17.5+.
 - Dictation (mic button) and "Handwriting to text" (••• menu) turn speech and handwriting into text boxes
 - Pages (••• menu): thumbnails, drag to reorder, duplicate, insert blank, delete
 - Import a PDF or Word (.docx) file from the library to annotate it
+- Accounts and sync: the cloud button in the library signs in (or creates an account with an invite code) and syncs
+  encrypted notes with the web portal. Format: `docs/SYNC-FORMAT.md`. Server: `backend/`. Web: `web/`.
+  Optional GitHub variable `INKWELL_API_URL` pre-fills the server address in the app.
 - Highlighter, pencil, ruler and shape snapping (hold at the end of a stroke) come from the PencilKit palette
 
 UI design: see the "Inkwell iPad Notes" canvas made with Claude Design.

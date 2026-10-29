@@ -30,6 +30,11 @@ final class Store: ObservableObject {
     @Published var notes: [Note] = []
     @Published var customTemplates: [CustomTemplate] = []
 
+    /// The sync engine listens here. They are not called for changes that arrive from the server.
+    var onNoteSaved: ((UUID) -> Void)?
+    var onNoteDeleted: ((UUID) -> Void)?
+    var onFoldersChanged: (() -> Void)?
+
     private let io = DispatchQueue(label: "inkwell.io", qos: .utility)
     private struct Meta: Codable {
         var folders: [Folder]
@@ -72,9 +77,42 @@ final class Store: ObservableObject {
         note.modified = Date()
         if let i = notes.firstIndex(where: { $0.id == note.id }) { notes[i] = note } else { notes.append(note) }
         write(note)
+        onNoteSaved?(note.id)
     }
 
     func note(_ id: UUID) -> Note? { notes.first { $0.id == id } }
+
+    // MARK: Changes from the server (no sync hooks, modified date kept)
+
+    func applyRemote(_ note: Note) {
+        if let i = notes.firstIndex(where: { $0.id == note.id }) { notes[i] = note } else { notes.append(note) }
+        write(note)
+    }
+
+    func removeRemote(_ id: UUID) {
+        guard let note = notes.first(where: { $0.id == id }) else { return }
+        removeLocal(note)
+    }
+
+    func applyRemoteFolders(_ remote: [Folder]) {
+        folders = remote
+        saveMeta()
+    }
+
+    /// Combines this iPad's folders with the server's. A folder with the same name as a server one is
+    /// treated as that folder, and its notes are moved into it.
+    func mergeFolders(remote: [Folder]) {
+        var result = remote
+        for local in folders where !remote.contains(where: { $0.id == local.id }) {
+            if let same = remote.first(where: { $0.name.caseInsensitiveCompare(local.name) == .orderedSame }) {
+                for note in notes where note.folderID == local.id { move(note, to: same.id) }
+            } else {
+                result.append(local)
+            }
+        }
+        folders = result
+        saveMeta()
+    }
 
     @discardableResult
     func addNote(template: TemplateKind, folder: UUID?, drawing: Data? = nil) -> Note {
@@ -98,6 +136,11 @@ final class Store: ObservableObject {
     }
 
     func delete(_ note: Note) {
+        removeLocal(note)
+        onNoteDeleted?(note.id)
+    }
+
+    private func removeLocal(_ note: Note) {
         notes.removeAll { $0.id == note.id }
         let url = Paths.notes.appendingPathComponent("\(note.id.uuidString).json")
         io.async { try? FileManager.default.removeItem(at: url) }
@@ -114,6 +157,7 @@ final class Store: ObservableObject {
         guard !trimmed.isEmpty else { return }
         folders.append(Folder(name: trimmed))
         saveMeta()
+        onFoldersChanged?()
     }
 
     func rename(_ folder: Folder, to name: String) {
@@ -121,12 +165,14 @@ final class Store: ObservableObject {
         guard !trimmed.isEmpty, let i = folders.firstIndex(of: folder) else { return }
         folders[i].name = trimmed
         saveMeta()
+        onFoldersChanged?()
     }
 
     func delete(_ folder: Folder) {
         for note in notes where note.folderID == folder.id { move(note, to: nil) }
         folders.removeAll { $0.id == folder.id }
         saveMeta()
+        onFoldersChanged?()
     }
 
     // MARK: Templates
