@@ -2,8 +2,8 @@
 // checklists, tables, stamps and pictures that can be moved and resized in "edit objects" mode.
 
 import { h, clear, toast, popMenu, download, safeFilename } from './dom.js';
-import { PAGE_W, PAGE_H, TEMPLATES, templateTitle } from './templates.js';
-import { drawPaper, drawInk, drawStroke, distanceToStroke, flattenPage, objectFont, rowHeight, layoutHeight } from './render.js';
+import { PAGE_W, PAGE_H, TEMPLATES, WHITEBOARD_BACKGROUNDS, templateTitle } from './templates.js';
+import { drawPaper, drawInk, drawStroke, distanceToStroke, flattenPage, pageSpec, objectFont, rowHeight, layoutHeight } from './render.js';
 import { newPage, uuid } from './store.js';
 
 const COLORS = ['#1B2430', '#2F5BEA', '#D97757', '#4FB286', '#C0392B', '#8E44AD'];
@@ -96,10 +96,30 @@ class PageView {
     this.live.addEventListener('pointercancel', (e) => editor.pointerUp(e, this));
   }
 
+  /** This note's page size in points. Every page of a note is the same size. */
+  get pw() {
+    return this.editor.note.pageWidth || PAGE_W;
+  }
+
+  get ph() {
+    return this.editor.note.pageHeight || PAGE_H;
+  }
+
+  get spec() {
+    return pageSpec(this.editor.note, this.editor.views.indexOf(this));
+  }
+
   applySize(scale) {
     this.scale = scale;
-    this.el.style.width = `${Math.round(PAGE_W * scale)}px`;
-    this.el.style.height = `${Math.round(PAGE_H * scale)}px`;
+    const { pw, ph } = this;
+    this.el.style.width = `${Math.round(pw * scale)}px`;
+    this.el.style.height = `${Math.round(ph * scale)}px`;
+    this.scaler.style.width = `${pw}px`;
+    this.scaler.style.height = `${ph}px`;
+    for (const c of [this.paper, this.ink, this.live]) {
+      c.style.width = `${pw}px`;
+      c.style.height = `${ph}px`;
+    }
     this.scaler.style.transform = `scale(${scale})`;
     if (this.rendered) this.render();
   }
@@ -111,10 +131,13 @@ class PageView {
   }
 
   render() {
-    this.k = clamp((window.devicePixelRatio || 1) * this.scale, 0.5, 3);
+    const { pw, ph } = this;
+    // Big whiteboards would need enormous bitmaps; keep each canvas to about 8 million pixels.
+    const cap = Math.min(3, Math.sqrt(8e6 / (pw * ph)));
+    this.k = clamp((window.devicePixelRatio || 1) * this.scale, 0.25, cap);
     for (const c of [this.paper, this.ink, this.live]) {
-      c.width = Math.round(PAGE_W * this.k);
-      c.height = Math.round(PAGE_H * this.k);
+      c.width = Math.max(1, Math.round(pw * this.k));
+      c.height = Math.max(1, Math.round(ph * this.k));
     }
     this.rendered = true;
     this.redrawPaper();
@@ -134,20 +157,20 @@ class PageView {
     if (!this.rendered) return;
     const edit = this.editor.editMode;
     const x = this.ctx(this.paper);
-    x.clearRect(0, 0, PAGE_W, PAGE_H);
-    drawPaper(x, this.page, this.editor.note.template, this.editor.lib.images, { objects: !edit, pictures: !edit });
+    x.clearRect(0, 0, this.pw, this.ph);
+    drawPaper(x, this.page, this.spec, this.editor.lib.images, { objects: !edit, pictures: !edit });
   }
 
   redrawInk() {
     if (!this.rendered) return;
     const x = this.ctx(this.ink);
-    x.clearRect(0, 0, PAGE_W, PAGE_H);
+    x.clearRect(0, 0, this.pw, this.ph);
     drawInk(x, this.page);
   }
 
   redrawLive(stroke) {
     const x = this.ctx(this.live);
-    x.clearRect(0, 0, PAGE_W, PAGE_H);
+    x.clearRect(0, 0, this.pw, this.ph);
     if (stroke) drawStroke(x, stroke);
   }
 
@@ -175,8 +198,8 @@ class PageView {
       const dx = (ev.clientX - sx) / this.scale;
       const dy = (ev.clientY - sy) / this.scale;
       if (mode === 'move') {
-        model.x = clamp(ox + dx, -model.width + 30, PAGE_W - 30);
-        model.y = clamp(oy + dy, -20, PAGE_H - 30);
+        model.x = clamp(ox + dx, -model.width + 30, this.pw - 30);
+        model.y = clamp(oy + dy, -20, this.ph - 30);
         el.style.left = `${model.x}px`;
         el.style.top = `${model.y}px`;
       } else {
@@ -330,9 +353,17 @@ export class Editor {
     this.drawing = null;
     this.erasing = null;
     this.panning = null;
+    this.zoom = null;      // whiteboards only: null means "fit the whole board"
+    this.boardFit = 1;
 
     this.build();
     this.renderPages();
+    // Ctrl or Cmd with the wheel (and a trackpad pinch) zooms a whiteboard.
+    this.scroller.addEventListener('wheel', (e) => {
+      if (!this.isBoard || !(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      this.zoomBy(e.deltaY < 0 ? 1.1 : 0.9);
+    }, { passive: false });
 
     this.onStatus = () => this.updateStatus();
     this.onRemote = (e) => this.handleRemote(e.detail);
@@ -358,6 +389,10 @@ export class Editor {
 
   get note() {
     return this.lib.note(this.noteId);
+  }
+
+  get isBoard() {
+    return this.note.kind === 'whiteboard';
   }
 
   destroy() {
@@ -415,7 +450,11 @@ export class Editor {
 
     const insertBtn = h('button', { class: 'btn', text: 'Insert ▾' });
     insertBtn.addEventListener('click', () => this.insertMenu(insertBtn));
-    const pagesBtn = h('button', { class: 'btn', text: 'Pages ▾' });
+    this.zoomBox = h('div', { class: 'zoom', hidden: !this.isBoard },
+      h('button', { class: 'icon', title: 'Zoom out', 'aria-label': 'Zoom out', text: '−', onClick: () => this.zoomBy(0.8) }),
+      h('button', { class: 'btn small', title: 'Fit the whole whiteboard', text: 'Fit', onClick: () => this.zoomFit() }),
+      h('button', { class: 'icon', title: 'Zoom in', 'aria-label': 'Zoom in', text: '+', onClick: () => this.zoomBy(1.25) }));
+    const pagesBtn = h('button', { class: 'btn', text: this.isBoard ? 'Board ▾' : 'Pages ▾' });
     pagesBtn.addEventListener('click', () => this.pagesMenu(pagesBtn));
     const exportBtn = h('button', { class: 'btn primary', text: 'Export ▾' });
     exportBtn.addEventListener('click', () => this.exportMenu(exportBtn));
@@ -426,7 +465,7 @@ export class Editor {
     });
 
     this.inspector = h('div', { class: 'ed-inspector', hidden: true });
-    this.pagesEl = h('div', { class: 'ed-pages' });
+    this.pagesEl = h('div', { class: `ed-pages${this.isBoard ? ' board' : ''}` });
     this.scroller = h('div', { class: 'ed-scroll' }, this.pagesEl);
 
     clear(this.root);
@@ -439,7 +478,7 @@ export class Editor {
           { class: 'ed-top' },
           h('div', { class: 'ed-row' },
             h('button', { class: 'btn', text: '‹ Library', onClick: () => this.close() }),
-            this.titleInput, this.statusEl, this.undoBtn, this.redoBtn, insertBtn, this.editBtn, pagesBtn, exportBtn),
+            this.titleInput, this.statusEl, this.undoBtn, this.redoBtn, this.zoomBox, insertBtn, this.editBtn, pagesBtn, exportBtn),
           h('div', { class: 'ed-row tools' },
             ...Object.values(this.toolButtons), this.swatchBox, this.colorInput,
             h('label', { class: 'size' }, 'Size', this.widthInput),
@@ -551,9 +590,24 @@ export class Editor {
   }
 
   layout() {
-    const avail = Math.max(260, this.scroller.clientWidth - 24);
-    const scale = Math.min(avail / PAGE_W, 1.4);
+    const availW = Math.max(260, this.scroller.clientWidth - 24);
+    const availH = Math.max(200, this.scroller.clientHeight - 24);
+    const pw = this.note.pageWidth || PAGE_W;
+    const ph = this.note.pageHeight || PAGE_H;
+    this.boardFit = Math.min(1, availW / pw, availH / ph);
+    // A page fits the screen's width. A whole whiteboard fits on screen until you zoom.
+    const scale = this.isBoard ? this.zoom ?? this.boardFit : Math.min(availW / pw, 1.4);
     for (const pv of this.views) pv.applySize(scale);
+  }
+
+  zoomBy(factor) {
+    this.zoom = clamp((this.zoom ?? this.boardFit) * factor, 0.08, 4);
+    this.layout();
+  }
+
+  zoomFit() {
+    this.zoom = null;
+    this.layout();
   }
 
   activeView() {
@@ -646,14 +700,16 @@ export class Editor {
 
   pointer(e, pv) {
     const r = pv.live.getBoundingClientRect();
-    return [((e.clientX - r.left) * PAGE_W) / r.width, ((e.clientY - r.top) * PAGE_H) / r.height];
+    return [((e.clientX - r.left) * pv.pw) / r.width, ((e.clientY - r.top) * pv.ph) / r.height];
   }
 
   pointerDown(e, pv) {
     if (this.editMode) return;
     if (e.pointerType === 'touch' && this.penOnly) {
       // The finger scrolls instead of drawing; the canvas can't do this itself because it needs touch-action: none for the pen.
-      this.panning = { id: e.pointerId, y: e.clientY, top: this.scroller.scrollTop };
+      this.panning = {
+        id: e.pointerId, x: e.clientX, y: e.clientY, left: this.scroller.scrollLeft, top: this.scroller.scrollTop,
+      };
       capture(pv.live, e.pointerId);
       return;
     }
@@ -688,6 +744,7 @@ export class Editor {
   pointerMove(e, pv) {
     if (this.panning && this.panning.id === e.pointerId) {
       this.scroller.scrollTop = this.panning.top - (e.clientY - this.panning.y);
+      this.scroller.scrollLeft = this.panning.left - (e.clientX - this.panning.x);   // whiteboards scroll sideways too
       return;
     }
     if (this.drawing && this.drawing.id === e.pointerId && this.drawing.pv === pv) {
@@ -820,14 +877,23 @@ export class Editor {
     if (!pv.rendered) pv.render();
     const o = makeObject(kind, text);
     const offset = (pv.page.objects.length % 8) * 36;
-    o.x += offset;
-    o.y += offset;
+    // Keep objects inside small pages (A6 is only 397 points wide). Whiteboards are huge, so start in the middle.
+    o.width = Math.min(o.width, Math.max(80, pv.pw - 80));
+    if (this.isBoard) {
+      o.x = (pv.pw - o.width) / 2 + offset;
+      o.y = pv.ph / 2 - 60 + offset;
+    } else {
+      o.x = Math.min(o.x + offset, Math.max(20, pv.pw - o.width - 20));
+      o.y = Math.min(o.y + offset, Math.max(20, pv.ph - 200));
+    }
     pv.page.objects.push(o);
     if (!this.editMode) this.setEditMode(true);
     else pv.buildItems();
     this.select(pv, o, 'object');
     this.changed();
-    pv.items.querySelector(`.item[data-id="${o.id}"] textarea`)?.focus();
+    const el = pv.items.querySelector(`.item[data-id="${o.id}"]`);
+    if (this.isBoard) el?.scrollIntoView({ block: 'center', inline: 'center' });
+    el?.querySelector('textarea')?.focus();
   }
 
   async pickedPicture(input) {
@@ -846,10 +912,12 @@ export class Editor {
       await this.lib.loadImage(fileId, 'image/jpeg');
       const pv = this.activeView();
       if (!pv.rendered) pv.render();
-      const w = Math.min(320, bitmap.width);
+      const w = Math.min(320, pv.pw * 0.6, bitmap.width);
+      const height = (w * bitmap.height) / bitmap.width;
       const im = {
         id: uuid(), file: fileId, mime: 'image/jpeg',
-        x: (PAGE_W - w) / 2, y: 200, width: w, height: (w * bitmap.height) / bitmap.width,
+        x: (pv.pw - w) / 2, y: this.isBoard ? (pv.ph - height) / 2 : Math.min(200, pv.ph * 0.15),
+        width: w, height,
       };
       pv.page.images.push(im);
       if (!this.editMode) this.setEditMode(true);
@@ -952,6 +1020,16 @@ export class Editor {
   // ---------- menus and export ----------
 
   pagesMenu(anchor) {
+    if (this.isBoard) {
+      popMenu(anchor, [
+        { label: 'Zoom to fit the whole board', onClick: () => this.zoomFit() },
+        { label: 'Zoom to 100%', onClick: () => { this.zoom = 1; this.layout(); } },
+        { divider: true },
+        { label: `Background: ${templateTitle(this.note.template)}`, disabled: true },
+        ...WHITEBOARD_BACKGROUNDS.map((id) => ({ label: `  ${templateTitle(id)}`, onClick: () => this.changeTemplate(id) })),
+      ]);
+      return;
+    }
     const at = this.views.indexOf(this.activeView());
     popMenu(anchor, [
       { label: `Add page after page ${at + 1}`, onClick: () => this.addPage() },
@@ -960,9 +1038,17 @@ export class Editor {
       { label: 'Move page down', disabled: at === this.views.length - 1, onClick: () => this.movePage(1) },
       { label: 'Delete this page', danger: true, onClick: () => this.deletePage() },
       { divider: true },
+      { label: this.note.pageNumbers ? 'Hide page numbers' : 'Show page numbers', onClick: () => this.togglePageNumbers() },
+      { divider: true },
       { label: `Template: ${templateTitle(this.note.template)}`, disabled: true },
       ...TEMPLATES.map((t) => ({ label: `  ${t.title}`, onClick: () => this.changeTemplate(t.id) })),
     ]);
+  }
+
+  togglePageNumbers() {
+    this.note.pageNumbers = !this.note.pageNumbers;
+    this.changed();
+    for (const pv of this.views) pv.redrawPaper();
   }
 
   exportMenu(anchor) {
@@ -984,7 +1070,7 @@ export class Editor {
   async exportPng() {
     const pv = this.activeView();
     await this.loadAllImages([pv.page]);
-    const canvas = flattenPage(pv.page, this.note.template, this.lib.images, 2);
+    const canvas = flattenPage(pv.page, pv.spec, this.lib.images, 2);
     const at = this.views.indexOf(pv) + 1;
     canvas.toBlob((blob) => download(blob, `${safeFilename(this.note.title)} page ${at}.png`), 'image/png');
   }
@@ -992,14 +1078,21 @@ export class Editor {
   async exportPdf() {
     await this.loadAllImages(this.note.pages);
     const root = h('div', { id: 'print-root' });
-    for (const page of this.note.pages) {
-      const canvas = flattenPage(page, this.note.template, this.lib.images, 2);
+    this.note.pages.forEach((page, i) => {
+      const canvas = flattenPage(page, pageSpec(this.note, i), this.lib.images, 2);
       root.append(h('img', { src: canvas.toDataURL('image/jpeg', 0.92), alt: '' }));
-    }
+    });
+    // Print at the note's own paper size rather than always A4.
+    const { pageWidth = PAGE_W, pageHeight = PAGE_H } = this.note;
+    const style = h('style', {
+      text: `@media print { @page { size: ${pageWidth}px ${pageHeight}px; margin: 0 } body.printing #print-root img { width: ${pageWidth}px; height: ${pageHeight}px } }`,
+    });
+    document.head.append(style);
     document.body.append(root);
     document.body.classList.add('printing');
     const cleanup = () => {
       root.remove();
+      style.remove();
       document.body.classList.remove('printing');
       window.removeEventListener('afterprint', cleanup);
     };

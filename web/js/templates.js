@@ -23,6 +23,31 @@ export const TEMPLATES = [
 ];
 
 export const CATEGORIES = ['Basic', 'Art guides', 'Planning', 'Study', 'Church'];
+
+// Paper sizes in points at 96 dpi, portrait. The same list as the iPad app.
+export const PAPER_PRESETS = [
+  { id: 'a4', title: 'A4', detail: '210 × 297 mm', w: 794, h: 1123 },
+  { id: 'a5', title: 'A5', detail: '148 × 210 mm', w: 559, h: 794 },
+  { id: 'a6', title: 'A6', detail: '105 × 148 mm', w: 397, h: 559 },
+  { id: 'b5', title: 'B5', detail: '176 × 250 mm', w: 665, h: 945 },
+  { id: 'letter', title: 'US Letter', detail: '8.5 × 11 in', w: 816, h: 1056 },
+  { id: 'legal', title: 'US Legal', detail: '8.5 × 14 in', w: 816, h: 1344 },
+];
+
+export const WHITEBOARD_SIZES = [
+  { id: 'small', title: 'Small', w: 2000, h: 1500 },
+  { id: 'medium', title: 'Medium', w: 3000, h: 2000 },
+  { id: 'large', title: 'Large', w: 4000, h: 3000 },
+  { id: 'huge', title: 'Huge', w: 6000, h: 4000 },
+];
+
+export const PAPER_COLOURS = [
+  ['White', '#FFFFFF'], ['Cream', '#FBF6E9'], ['Light blue', '#EEF4FF'], ['Light grey', '#F2F2F2'], ['Soft yellow', '#FFF9D6'],
+];
+export const COVER_COLOURS = [
+  ['Blue', '#2F5BEA'], ['Clay', '#D97757'], ['Green', '#4FB286'], ['Purple', '#8E44AD'], ['Red', '#C0392B'], ['Charcoal', '#1B2430'],
+];
+export const WHITEBOARD_BACKGROUNDS = ['blank', 'grid', 'dots'];
 export const templateTitle = (id) => TEMPLATES.find((t) => t.id === id)?.title ?? id;
 
 const RULE = '#ccd9f0';
@@ -326,6 +351,36 @@ export function drawTemplate(ctx, kind, w = PAGE_W, h = PAGE_H) {
 
     default:
       break;
+  }
+  ctx.restore();
+}
+
+/** Draws a template onto a page of any size. The layouts are designed for A4's width (794) and are scaled
+ *  to the page's width, so A5, A6 and B5, which have the same proportions, look exactly like A4. */
+export function drawTemplateFitted(ctx, kind, w, h) {
+  const scale = w / PAGE_W;
+  ctx.save();
+  ctx.scale(scale, scale);
+  drawTemplate(ctx, kind, PAGE_W, h / scale);
+  ctx.restore();
+}
+
+/** A whiteboard background: plain, a grid or dots spread over the whole board at a fixed spacing. */
+export function drawBoard(ctx, kind, w, h) {
+  ctx.save();
+  if (kind === 'grid') {
+    for (let x = 0; x <= w; x += 28) line(ctx, x, 0, x, h, RULE, 0.8);
+    for (let y = 0; y <= h; y += 28) line(ctx, 0, y, w, y, RULE, 0.8);
+  } else if (kind === 'dots') {
+    ctx.fillStyle = STRONG;
+    ctx.beginPath();
+    for (let x = 14; x < w; x += 28) {
+      for (let y = 14; y < h; y += 28) {
+        ctx.moveTo(x + 1.2, y);
+        ctx.arc(x, y, 1.2, 0, Math.PI * 2);
+      }
+    }
+    ctx.fill();
   }
   ctx.restore();
 }

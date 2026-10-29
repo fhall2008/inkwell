@@ -125,11 +125,12 @@ enum Exporter {
     // MARK: PDF
 
     private static func pdf(_ note: Note, _ includeTemplate: Bool) -> Data {
-        let a4 = CGRect(x: 0, y: 0, width: 595.2, height: 841.8)
-        return UIGraphicsPDFRenderer(bounds: a4).pdfData { ctx in
+        // The PDF page is the note's own paper size. Pages are drawn at 96 dpi; PDF points are 72 dpi.
+        let bounds = CGRect(x: 0, y: 0, width: note.pageWidth * 0.75, height: note.pageHeight * 0.75)
+        return UIGraphicsPDFRenderer(bounds: bounds).pdfData { ctx in
             for page in note.pages {
                 ctx.beginPage()
-                PageRenderer.render(note: note, page: page, scale: 2.5, includeTemplate: includeTemplate).draw(in: a4)
+                PageRenderer.render(note: note, page: page, scale: 2.5, includeTemplate: includeTemplate).draw(in: bounds)
             }
         }
     }
@@ -199,8 +200,13 @@ enum Exporter {
     private static func docx(_ note: Note, _ includeTemplate: Bool) throws -> Data {
         let texts = pageTexts(note)
         // 15.9 cm wide: fits inside A4 with 2.5 cm margins. 360000 EMU per cm.
-        let cx = 15.9 * 360000
-        let cy = cx * Double(PageRenderer.pageSize.height / PageRenderer.pageSize.width)
+        var cx = 15.9 * 360000
+        var cy = cx * note.pageHeight / note.pageWidth
+        let maxHeight = 24.0 * 360000   // tall paper such as US Legal would not fit on an A4 Word page
+        if cy > maxHeight {
+            cx *= maxHeight / cy
+            cy = maxHeight
+        }
         var zip = ZipWriter()
         var body = ""
         var rels = ""

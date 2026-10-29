@@ -50,7 +50,14 @@ reference implementation; the iPad app must read and write the same shapes.
 }
 ```
 
-- Page space is 794 x 1123 points (A4 at 96 dpi), origin top-left, the same as the iPad app.
+- Page space is in points at 96 dpi, origin top-left, the same as the iPad app. A4 portrait is 794 x 1123.
+- Notebooks and whiteboards add these optional fields to the note (a note without them is an A4 portrait note on white paper):
+  `kind` (`"note"`, `"notebook"` or `"whiteboard"`), `pageWidth`, `pageHeight` (points; every page of a note is the same size),
+  `cover` (notebook cover colour, `"#RRGGBB"`), `paper` (paper colour), `pageNumbers` (true or false).
+  Sizes used: A4 794x1123, A5 559x794, A6 397x559, B5 665x945, US Letter 816x1056, US Legal 816x1344 (swap for landscape);
+  whiteboards 2000x1500, 3000x2000, 4000x3000 or 6000x4000. A whiteboard has exactly one page and its `template` is
+  `blank`, `grid` or `dots`, drawn at a fixed 28-point spacing over the whole board.
+- Templates are designed for a 794-wide page and are scaled to the page's width, so A5, A6 and B5 look the same as A4.
 - `template` values: `blank ruled grid dots cornell meeting planner sermon onePoint twoPoint face figure colourWheel valueScale thirds isometric`.
 - Object `kind` values the web draws: `text sticky checklist table stamp`. Unknown kinds are skipped, not deleted.
   Object fields match the iPad `PageObject` struct. `items` is `[{id, text, done}]`; `cells` is a grid of strings.

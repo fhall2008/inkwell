@@ -177,6 +177,91 @@ struct NotePage: Identifiable, Codable {
     }
 }
 
+enum NoteKind: String, Codable {
+    case note, notebook, whiteboard
+}
+
+/// Standard paper sizes. Sizes are portrait, in points at 96 dpi (the unit every page is drawn in).
+enum PaperPreset: String, CaseIterable, Identifiable {
+    case a4, a5, a6, b5, letter, legal
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .a4: "A4"
+        case .a5: "A5"
+        case .a6: "A6"
+        case .b5: "B5"
+        case .letter: "US Letter"
+        case .legal: "US Legal"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .a4: "210 × 297 mm"
+        case .a5: "148 × 210 mm"
+        case .a6: "105 × 148 mm"
+        case .b5: "176 × 250 mm"
+        case .letter: "8.5 × 11 in"
+        case .legal: "8.5 × 14 in"
+        }
+    }
+
+    var size: CGSize {
+        switch self {
+        case .a4: CGSize(width: 794, height: 1123)
+        case .a5: CGSize(width: 559, height: 794)
+        case .a6: CGSize(width: 397, height: 559)
+        case .b5: CGSize(width: 665, height: 945)
+        case .letter: CGSize(width: 816, height: 1056)
+        case .legal: CGSize(width: 816, height: 1344)
+        }
+    }
+
+    func size(landscape: Bool) -> CGSize {
+        landscape ? CGSize(width: size.height, height: size.width) : size
+    }
+}
+
+/// Sizes for whiteboards, in points. They are big so there is room to spread out, and are zoomed to fit.
+enum WhiteboardSize: String, CaseIterable, Identifiable {
+    case small, medium, large, huge
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .small: "Small"
+        case .medium: "Medium"
+        case .large: "Large"
+        case .huge: "Huge"
+        }
+    }
+
+    var size: CGSize {
+        switch self {
+        case .small: CGSize(width: 2000, height: 1500)
+        case .medium: CGSize(width: 3000, height: 2000)
+        case .large: CGSize(width: 4000, height: 3000)
+        case .huge: CGSize(width: 6000, height: 4000)
+        }
+    }
+}
+
+/// Paper and cover colours offered when making a notebook or whiteboard.
+enum PaperColours {
+    static let paper: [(name: String, hex: String)] = [
+        ("White", "#FFFFFF"), ("Cream", "#FBF6E9"), ("Light blue", "#EEF4FF"),
+        ("Light grey", "#F2F2F2"), ("Soft yellow", "#FFF9D6"),
+    ]
+    static let cover: [(name: String, hex: String)] = [
+        ("Blue", "#2F5BEA"), ("Clay", "#D97757"), ("Green", "#4FB286"),
+        ("Purple", "#8E44AD"), ("Red", "#C0392B"), ("Charcoal", "#1B2430"),
+    ]
+}
+
 struct Note: Identifiable, Codable {
     var id = UUID()
     var title = "Untitled note"
@@ -184,10 +269,40 @@ struct Note: Identifiable, Codable {
     var template: TemplateKind = .ruled
     var pages: [NotePage] = [NotePage()]
     var modified = Date()
+    var kind: NoteKind = .note
+    /// Page size in points. Every page of a note is the same size (A4 portrait unless set otherwise).
+    var pageWidth: Double = 794
+    var pageHeight: Double = 1123
+    /// Notebook cover colour, shown on the library card.
+    var coverHex: String?
+    var paperHex: String = "#FFFFFF"
+    var pageNumbers = false
+
+    var pageSize: CGSize { CGSize(width: pageWidth, height: pageHeight) }
+    var isWhiteboard: Bool { kind == .whiteboard }
 
     /// Every image file this note depends on.
     var imageFiles: Set<String> {
         Set(pages.flatMap { page in page.images.map(\.file) + [page.background].compactMap { $0 } })
+    }
+}
+
+extension Note {
+    /// Tolerant decoding so notes saved before notebooks and whiteboards existed still open.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? "Untitled note"
+        folderID = try c.decodeIfPresent(UUID.self, forKey: .folderID)
+        template = try c.decodeIfPresent(TemplateKind.self, forKey: .template) ?? .ruled
+        pages = try c.decodeIfPresent([NotePage].self, forKey: .pages) ?? [NotePage()]
+        modified = try c.decodeIfPresent(Date.self, forKey: .modified) ?? Date()
+        kind = try c.decodeIfPresent(NoteKind.self, forKey: .kind) ?? .note
+        pageWidth = try c.decodeIfPresent(Double.self, forKey: .pageWidth) ?? 794
+        pageHeight = try c.decodeIfPresent(Double.self, forKey: .pageHeight) ?? 1123
+        coverHex = try c.decodeIfPresent(String.self, forKey: .coverHex)
+        paperHex = try c.decodeIfPresent(String.self, forKey: .paperHex) ?? "#FFFFFF"
+        pageNumbers = try c.decodeIfPresent(Bool.self, forKey: .pageNumbers) ?? false
     }
 }
 

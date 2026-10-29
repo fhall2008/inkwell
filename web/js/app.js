@@ -6,8 +6,11 @@ import * as C from './crypto.js';
 import { deviceVault, blobCache } from './idb.js';
 import { Library } from './store.js';
 import { Editor } from './editor.js';
-import { TEMPLATES, CATEGORIES, drawTemplate, PAGE_W, PAGE_H, templateTitle } from './templates.js';
-import { drawPaper, drawInk } from './render.js';
+import {
+  TEMPLATES, CATEGORIES, drawTemplate, PAGE_W, PAGE_H, templateTitle,
+  PAPER_PRESETS, WHITEBOARD_SIZES, PAPER_COLOURS, COVER_COLOURS, WHITEBOARD_BACKGROUNDS,
+} from './templates.js';
+import { drawPaper, drawInk, pageSpec } from './render.js';
 
 const root = $('#app');
 const app = { api: null, user: null, master: null, lib: null, editor: null, view: 'auth', folder: 'all', search: '', remember: false };
@@ -387,11 +390,19 @@ function showLibrary() {
   app.statusHandler = () => app.view === 'library' && updateStatus();
   app.lib.addEventListener('status', app.statusHandler);
 
+  const newBtn = h('button', { class: 'btn primary', text: 'New ▾', 'aria-haspopup': 'menu' });
+  newBtn.addEventListener('click', () =>
+    popMenu(newBtn, [
+      { label: 'New note', onClick: () => pickTemplate() },
+      { label: 'New notebook…', onClick: () => setupNotebook() },
+      { label: 'New whiteboard…', onClick: () => setupWhiteboard() },
+    ]));
+
   clear(root).append(
     h('div', { class: 'library' },
       h('header', { class: 'lib-top' },
         h('h1', { class: 'brand', text: 'Inkwell' }), search, status,
-        h('button', { class: 'btn primary', text: 'New note', onClick: () => pickTemplate() }),
+        newBtn,
         h('button', { class: 'btn', text: 'Settings', onClick: () => showSettings() })),
       h('div', { class: 'lib-body' }, h('nav', { class: 'folders', 'aria-label': 'Folders' }), h('main', { class: 'notes' }))),
   );
@@ -452,10 +463,16 @@ function noteCard(note) {
   const canvas = h('canvas', { class: 'thumb', 'aria-hidden': 'true' });
   queueThumb(canvas, note);
   const folder = app.lib.folders.find((f) => f.id === note.folderId)?.name;
+  const kind = { notebook: 'Notebook · ', whiteboard: 'Whiteboard · ' }[note.kind] || '';
+  const pw = note.pageWidth || PAGE_W;
+  const ph = note.pageHeight || PAGE_H;
+  const pages = note.kind === 'whiteboard' ? '' : ` · ${note.pages.length} page${note.pages.length === 1 ? '' : 's'}`;
   const open = h('button', { class: 'card-open', 'aria-label': `Open ${note.title}`, onClick: () => openEditor(note.id) },
-    h('div', { class: 'thumb-wrap' }, canvas),
+    h('div', { class: 'thumb-wrap', style: { aspectRatio: `${pw} / ${ph}` } }, canvas,
+      note.kind === 'notebook' && note.cover ? h('span', { class: 'spine', style: { background: note.cover } }) : null,
+      note.kind && note.kind !== 'note' ? h('span', { class: 'badge', 'aria-hidden': 'true', text: note.kind === 'whiteboard' ? '▭' : '▤' }) : null),
     h('div', { class: 'card-title', text: note.title || 'Untitled note' }),
-    h('div', { class: 'card-meta', text: `${folder ? `${folder} · ` : ''}${relative(note.modified)} · ${note.pages.length} page${note.pages.length === 1 ? '' : 's'}` }));
+    h('div', { class: 'card-meta', text: `${folder ? `${folder} · ` : ''}${kind}${relative(note.modified)}${pages}` }));
   const more = h('button', { class: 'icon card-more', 'aria-label': `Options for ${note.title}`, text: '⋯' });
   more.addEventListener('click', () =>
     popMenu(more, [
@@ -491,16 +508,18 @@ function runThumbs() {
 }
 
 function drawThumb(canvas, note) {
+  const spec = pageSpec(note, 0);
   const width = 240;
-  const height = Math.round((width * PAGE_H) / PAGE_W);
+  const height = Math.max(1, Math.round((width * spec.h) / spec.w));
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   canvas.width = width * dpr;
   canvas.height = height * dpr;
   const page = note.pages[0];
   const ctx = canvas.getContext('2d');
-  ctx.setTransform((width * dpr) / PAGE_W, 0, 0, (width * dpr) / PAGE_W, 0, 0);
-  ctx.clearRect(0, 0, PAGE_W, PAGE_H);
-  drawPaper(ctx, page, note.template, app.lib.images);
+  const k = (width * dpr) / spec.w;
+  ctx.setTransform(k, 0, 0, k, 0, 0);
+  ctx.clearRect(0, 0, spec.w, spec.h);
+  drawPaper(ctx, page, spec, app.lib.images);
   drawInk(ctx, page);
   // Pictures arrive asynchronously; redraw once when they have loaded.
   const pending = [page.background, ...(page.images || []).map((i) => i.file)].filter((id) => id && !app.lib.images.has(id));
@@ -542,6 +561,156 @@ function pickTemplate() {
           close();
           openEditor(note.id);
         } }))),
+  { wide: true });
+}
+
+// ---------- notebooks and whiteboards ----------
+
+function swatchRow(items, current, onPick) {
+  const row = h('div', { class: 'swatch-row', role: 'radiogroup' });
+  const render = () => {
+    clear(row);
+    for (const [name, hex] of items) {
+      row.append(h('button', {
+        type: 'button', role: 'radio', class: `sw${hex === current ? ' on' : ''}`, style: { background: hex },
+        title: name, 'aria-label': name, 'aria-checked': String(hex === current),
+        onClick: () => { current = hex; onPick(hex); render(); },
+      }));
+    }
+  };
+  render();
+  return row;
+}
+
+function segmented(options, current, onPick) {
+  const row = h('div', { class: 'seg', role: 'radiogroup' });
+  const render = () => {
+    clear(row);
+    for (const [id, label] of options) {
+      row.append(h('button', {
+        type: 'button', role: 'radio', 'aria-checked': String(id === current), class: id === current ? 'on' : '',
+        text: label, onClick: () => { current = id; onPick(id); render(); },
+      }));
+    }
+  };
+  render();
+  return row;
+}
+
+const field = (label, control, hint) =>
+  h('div', { class: 'field' }, label, control, hint ? h('span', { class: 'hint', text: hint }) : null);
+
+/** Draws one blank page of the chosen paper into a small canvas. */
+function paintPreview(canvas, spec, maxW, maxH) {
+  const k = Math.min(maxW / spec.w, maxH / spec.h);
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  canvas.width = Math.max(1, Math.round(spec.w * k * dpr));
+  canvas.height = Math.max(1, Math.round(spec.h * k * dpr));
+  canvas.style.width = `${Math.round(spec.w * k)}px`;
+  canvas.style.height = `${Math.round(spec.h * k)}px`;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(k * dpr, 0, 0, k * dpr, 0, 0);
+  drawPaper(ctx, {}, spec, new Map());
+}
+
+function setupNotebook() {
+  const opt = { title: 'My notebook', cover: COVER_COLOURS[0][1], preset: 'a4', landscape: false, template: 'ruled', paper: '#FFFFFF', numbers: true, pages: 20 };
+  const size = () => {
+    const p = PAPER_PRESETS.find((x) => x.id === opt.preset) || PAPER_PRESETS[0];
+    return opt.landscape ? { w: p.h, h: p.w } : { w: p.w, h: p.h };
+  };
+  const preview = h('canvas', { class: 'nb-preview', 'aria-hidden': 'true' });
+  const coverBar = h('span', { class: 'spine', style: { background: opt.cover } });
+  const redraw = () => {
+    const { w, h: hh } = size();
+    paintPreview(preview, { w, h: hh, template: opt.template, paper: opt.paper, whiteboard: false, numbers: opt.numbers, number: 1 }, 190, 230);
+    coverBar.style.background = opt.cover;
+  };
+
+  const strip = h('div', { class: 'tpl-strip', role: 'radiogroup', 'aria-label': 'Paper style' });
+  const renderStrip = () => {
+    clear(strip);
+    for (const t of TEMPLATES) {
+      const c = h('canvas', { width: 84, height: Math.round((84 * PAGE_H) / PAGE_W) });
+      const ctx = c.getContext('2d');
+      ctx.scale(84 / PAGE_W, 84 / PAGE_W);
+      ctx.fillStyle = opt.paper;
+      ctx.fillRect(0, 0, PAGE_W, PAGE_H);
+      drawTemplate(ctx, t.id);
+      strip.append(h('button', { type: 'button', role: 'radio', 'aria-checked': String(opt.template === t.id), class: `tpl-mini${opt.template === t.id ? ' on' : ''}`, onClick: () => { opt.template = t.id; renderStrip(); redraw(); } },
+        c, h('span', { text: t.title })));
+    }
+  };
+
+  const titleInput = h('input', { type: 'text', value: opt.title, maxlength: '80', onInput: () => { opt.title = titleInput.value; } });
+  const sizeSelect = h('select', { onChange: () => { opt.preset = sizeSelect.value; redraw(); } },
+    PAPER_PRESETS.map((p) => h('option', { value: p.id, text: `${p.title}  ·  ${p.detail}`, selected: p.id === opt.preset })));
+  const pagesSelect = h('select', { onChange: () => { opt.pages = Number(pagesSelect.value); } },
+    [1, 5, 10, 20, 50, 100, 200].map((n) => h('option', { value: String(n), text: String(n), selected: n === opt.pages })));
+  const numbersBox = h('input', { type: 'checkbox', checked: opt.numbers, onChange: () => { opt.numbers = numbersBox.checked; redraw(); } });
+
+  renderStrip();
+  redraw();
+  modal('New notebook', (close) =>
+    h('div', { class: 'setup' },
+      h('div', { class: 'setup-form stack' },
+        field('Name', titleInput),
+        field('Cover colour', swatchRow(COVER_COLOURS, opt.cover, (hex) => { opt.cover = hex; redraw(); })),
+        field('Paper size', sizeSelect),
+        field('Orientation', segmented([['p', 'Portrait'], ['l', 'Landscape']], 'p', (v) => { opt.landscape = v === 'l'; redraw(); })),
+        field('Paper style', strip),
+        field('Paper colour', swatchRow(PAPER_COLOURS, opt.paper, (hex) => { opt.paper = hex; renderStrip(); redraw(); })),
+        h('label', { class: 'check' }, numbersBox, 'Page numbers'),
+        field('Number of pages', pagesSelect, 'You can add, remove and reorder pages whenever you like.'),
+        h('div', { class: 'row-btns end' },
+          h('button', { class: 'btn', text: 'Cancel', onClick: close }),
+          h('button', { class: 'btn primary', text: 'Create notebook', onClick: () => {
+            const { w, h: hh } = size();
+            const note = app.lib.createNote({
+              title: opt.title.trim() || 'Notebook', template: opt.template, folderId: app.folder !== 'all' ? app.folder : null,
+              kind: 'notebook', width: w, height: hh, cover: opt.cover, paper: opt.paper, pageNumbers: opt.numbers, pageCount: opt.pages,
+            });
+            close();
+            openEditor(note.id);
+          } }))),
+      h('div', { class: 'setup-preview' }, h('div', { class: 'nb-wrap' }, preview, coverBar))),
+  { wide: true });
+}
+
+function setupWhiteboard() {
+  const opt = { title: 'Whiteboard', size: 'medium', background: 'blank', paper: '#FFFFFF' };
+  const preview = h('canvas', { class: 'nb-preview', 'aria-hidden': 'true' });
+  const redraw = () => {
+    const s = WHITEBOARD_SIZES.find((x) => x.id === opt.size) || WHITEBOARD_SIZES[1];
+    paintPreview(preview, { w: s.w, h: s.h, template: opt.background, paper: opt.paper, whiteboard: true, numbers: false, number: 1 }, 260, 190);
+  };
+  const sizeHint = h('span', { class: 'hint' });
+  const hint = () => {
+    const s = WHITEBOARD_SIZES.find((x) => x.id === opt.size);
+    sizeHint.textContent = `${s.w} × ${s.h} points. A whiteboard is one big page. Zoom in and scroll to move around.`;
+  };
+  const titleInput = h('input', { type: 'text', value: opt.title, maxlength: '80', onInput: () => { opt.title = titleInput.value; } });
+  hint();
+  redraw();
+  modal('New whiteboard', (close) =>
+    h('div', { class: 'setup' },
+      h('div', { class: 'setup-form stack' },
+        field('Name', titleInput),
+        h('div', { class: 'field' }, 'Size', segmented(WHITEBOARD_SIZES.map((s) => [s.id, s.title]), opt.size, (v) => { opt.size = v; hint(); redraw(); }), sizeHint),
+        field('Background', segmented(WHITEBOARD_BACKGROUNDS.map((id) => [id, templateTitle(id)]), opt.background, (v) => { opt.background = v; redraw(); })),
+        field('Board colour', swatchRow(PAPER_COLOURS, opt.paper, (hex) => { opt.paper = hex; redraw(); })),
+        h('div', { class: 'row-btns end' },
+          h('button', { class: 'btn', text: 'Cancel', onClick: close }),
+          h('button', { class: 'btn primary', text: 'Create whiteboard', onClick: () => {
+            const s = WHITEBOARD_SIZES.find((x) => x.id === opt.size);
+            const note = app.lib.createNote({
+              title: opt.title.trim() || 'Whiteboard', template: opt.background, folderId: app.folder !== 'all' ? app.folder : null,
+              kind: 'whiteboard', width: s.w, height: s.h, paper: opt.paper, pageNumbers: false, pageCount: 1,
+            });
+            close();
+            openEditor(note.id);
+          } }))),
+      h('div', { class: 'setup-preview' }, h('div', { class: 'nb-wrap' }, preview))),
   { wide: true });
 }
 

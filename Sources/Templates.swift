@@ -60,6 +60,73 @@ enum TemplateKind: String, Codable, CaseIterable, Identifiable {
         return img
     }
 
+    /// Cached background image for a page of any size. Layouts are designed for A4's width and are scaled
+    /// to the page's width, so A5, A6 and B5 (which have the same proportions) look exactly like A4.
+    func image(size: CGSize, paperHex: String) -> UIImage {
+        let key = "\(rawValue)-\(Int(size.width))x\(Int(size.height))-\(paperHex)" as NSString
+        if let hit = Self.cache.object(forKey: key) { return hit }
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 2
+        let img = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            UIColor(hex: paperHex).setFill()
+            UIRectFill(CGRect(origin: .zero, size: size))
+            drawFitted(size: size)
+        }
+        Self.cache.setObject(img, forKey: key)
+        return img
+    }
+
+    /// A small A4-shaped preview for pickers, so showing all sixteen doesn't keep sixteen full-size images in memory.
+    func preview(paperHex: String) -> UIImage {
+        let key = "preview-\(rawValue)-\(paperHex)" as NSString
+        if let hit = Self.cache.object(forKey: key) { return hit }
+        let size = PageRenderer.pageSize
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 0.35
+        let img = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            UIColor(hex: paperHex).setFill()
+            UIRectFill(CGRect(origin: .zero, size: size))
+            draw(size: size)
+        }
+        Self.cache.setObject(img, forKey: key)
+        return img
+    }
+
+    /// Draws the template into the current context, scaled so its A4-wide layout fills a page of `size`.
+    func drawFitted(size: CGSize) {
+        guard let ctx = UIGraphicsGetCurrentContext() else { return }
+        let scale = size.width / 794
+        ctx.saveGState()
+        ctx.scaleBy(x: scale, y: scale)
+        draw(size: CGSize(width: 794, height: size.height / scale))
+        ctx.restoreGState()
+    }
+
+    /// A small repeating tile for whiteboards, so a 6000-point board doesn't need a 6000-point image.
+    /// Only grid and dots repeat; everything else is a plain board.
+    static func whiteboardTile(_ kind: TemplateKind, paperHex: String) -> UIImage? {
+        guard kind == .grid || kind == .dots else { return nil }
+        let key = "tile-\(kind.rawValue)-\(paperHex)" as NSString
+        if let hit = cache.object(forKey: key) { return hit }
+        let side: CGFloat = 28
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 2
+        let img = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { _ in
+            UIColor(hex: paperHex).setFill()
+            UIRectFill(CGRect(x: 0, y: 0, width: side, height: side))
+            if kind == .grid {
+                UIColor(red: 0.80, green: 0.85, blue: 0.94, alpha: 1).setFill()
+                UIRectFill(CGRect(x: 0, y: 0, width: side, height: 0.8))
+                UIRectFill(CGRect(x: 0, y: 0, width: 0.8, height: side))
+            } else {
+                UIColor(red: 0.55, green: 0.60, blue: 0.70, alpha: 1).setFill()
+                UIBezierPath(ovalIn: CGRect(x: side / 2 - 1.2, y: side / 2 - 1.2, width: 2.4, height: 2.4)).fill()
+            }
+        }
+        cache.setObject(img, forKey: key)
+        return img
+    }
+
     /// Draws into the current UIKit graphics context.
     func draw(size: CGSize) {
         let w = size.width, h = size.height

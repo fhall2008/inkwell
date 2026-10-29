@@ -154,9 +154,18 @@ export class Library extends EventTarget {
 
   // ---------- writing ----------
 
-  createNote({ title = 'Untitled note', template = 'ruled', folderId = null } = {}) {
+  /** Makes a note, notebook or whiteboard. Sizes are in points at 96 dpi (A4 portrait is 794 x 1123). */
+  createNote({
+    title = 'Untitled note', template = 'ruled', folderId = null,
+    kind = 'note', width = 794, height = 1123, cover = null, paper = '#FFFFFF', pageNumbers = false, pageCount = 1,
+  } = {}) {
     const id = uuid();
-    const data = { v: 1, id, title, folderId, template, modified: Date.now(), pages: [newPage()] };
+    const data = {
+      v: 1, id, title, folderId, template, modified: Date.now(),
+      pages: Array.from({ length: Math.max(1, pageCount) }, () => newPage()),
+      kind, pageWidth: width, pageHeight: height, paper, pageNumbers,
+    };
+    if (cover) data.cover = cover;
     const item = this.blank('note', data);
     this.items.set(id, item);
     item.dirty = true;

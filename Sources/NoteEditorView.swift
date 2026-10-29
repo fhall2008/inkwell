@@ -19,29 +19,48 @@ struct NoteEditorView: View {
     @State private var alertText: String?
     @State private var saveTask: Task<Void, Never>?
     @State private var presenting = false
+    @State private var zoom: CGFloat?          // whiteboards only; nil means "fit the whole board"
+    @State private var pinchBase: CGFloat?
+    @State private var boardFit: CGFloat = 0.4
     @StateObject private var dictation = Dictation()
 
     private static let stamps = ["APPROVED", "DRAFT", "DONE", "URGENT", "CONFIDENTIAL", "REVIEWED"]
 
     init(note: Note) { _note = State(initialValue: note) }
 
-    private var pageSize: CGSize { PageRenderer.pageSize }
+    private var pageSize: CGSize { note.pageSize }
     private var hasObjects: Bool { note.pages.contains { !$0.images.isEmpty || !$0.objects.isEmpty } }
+
+    private func style(for id: UUID) -> PaperStyle {
+        PaperStyle(
+            size: note.pageSize,
+            paperHex: note.paperHex,
+            template: note.template,
+            whiteboard: note.isWhiteboard,
+            showNumber: note.pageNumbers && !note.isWhiteboard,
+            number: (note.pages.firstIndex { $0.id == id } ?? 0) + 1
+        )
+    }
+
+    private func zoomBoard(by factor: CGFloat) {
+        zoom = min(4, max(0.08, (zoom ?? boardFit) * factor))
+    }
 
     var body: some View {
         NavigationStack {
             GeometryReader { geo in
                 let fitWidth = (geo.size.width - 40) / pageSize.width
                 let fitHeight = (geo.size.height - 48) / pageSize.height
-                // Present mode shrinks a whole page to fit the screen.
-                let scale = min(1, presenting ? min(fitWidth, fitHeight) : fitWidth)
+                // A page fits the screen's width. A whole whiteboard, and present mode, fit the whole page on screen.
+                let fit = (note.isWhiteboard || presenting) ? min(fitWidth, fitHeight) : fitWidth
+                let scale = note.isWhiteboard ? (zoom ?? min(1, fit)) : min(1, fit)
                 ScrollViewReader { proxy in
-                    ScrollView {
+                    ScrollView(note.isWhiteboard ? [.horizontal, .vertical] : [.vertical]) {
                         VStack(spacing: 24) {
                             ForEach($note.pages) { $page in
                                 PageView(
                                     page: $page,
-                                    template: note.template,
+                                    style: style(for: page.id),
                                     editMode: editMode,
                                     selectedID: selectedID,
                                     onSelect: { selectedID = $0 },
@@ -49,14 +68,28 @@ struct NoteEditorView: View {
                                     onChange: scheduleSave
                                 )
                                 .frame(width: pageSize.width, height: pageSize.height)
-                                .scaleEffect(scale, anchor: .top)
+                                .scaleEffect(scale)
                                 .frame(width: pageSize.width * scale, height: pageSize.height * scale)
                                 .id(page.id)
                             }
                         }
                         .padding(.vertical, 24)
+                        .padding(.horizontal, note.isWhiteboard ? 24 : 0)
                         .frame(maxWidth: .infinity)
+                        .frame(minHeight: note.isWhiteboard ? geo.size.height : nil)
                     }
+                    .simultaneousGesture(
+                        MagnifyGesture()
+                            .onChanged { value in
+                                let base = pinchBase ?? scale
+                                pinchBase = base
+                                zoom = min(4, max(0.08, base * value.magnification))
+                            }
+                            .onEnded { _ in pinchBase = nil },
+                        including: note.isWhiteboard ? .gesture : .none
+                    )
+                    .onAppear { boardFit = min(1, min(fitWidth, fitHeight)) }
+                    .onChange(of: geo.size) { _, _ in boardFit = min(1, min(fitWidth, fitHeight)) }
                     .onChange(of: jumpTo) { _, id in
                         guard let id else { return }
                         withAnimation { proxy.scrollTo(id, anchor: .top) }
@@ -95,7 +128,8 @@ struct NoteEditorView: View {
         }
         .fullScreenCover(isPresented: $showCamera) { CameraPicker(onImage: insert).ignoresSafeArea() }
         .confirmationDialog("Change template", isPresented: $showTemplateMenu) {
-            ForEach(TemplateKind.allCases) { kind in
+            // Whiteboards only repeat a plain, grid or dot background.
+            ForEach(note.isWhiteboard ? [TemplateKind.blank, .grid, .dots] : TemplateKind.allCases) { kind in
                 Button(kind.title) { note.template = kind; scheduleSave() }
             }
         }
@@ -141,7 +175,7 @@ struct NoteEditorView: View {
                     .multilineTextAlignment(.center)
                     .frame(width: 320)
                     .onChange(of: note.title) { scheduleSave() }
-                Text("\(note.template.title) · \(note.pages.count) page\(note.pages.count == 1 ? "" : "s")")
+                Text(subtitle)
                     .font(.caption2).foregroundStyle(.secondary)
             }
         }
@@ -176,6 +210,15 @@ struct NoteEditorView: View {
             } label: { Image(systemName: dictation.isListening ? "mic.fill" : "mic") }
                 .accessibilityLabel("Dictate text")
 
+            if note.isWhiteboard {
+                Button { zoomBoard(by: 0.8) } label: { Image(systemName: "minus.magnifyingglass") }
+                    .accessibilityLabel("Zoom out")
+                Button { zoom = nil } label: { Image(systemName: "arrow.up.left.and.down.right.magnifyingglass") }
+                    .accessibilityLabel("Fit whole whiteboard")
+                Button { zoomBoard(by: 1.25) } label: { Image(systemName: "plus.magnifyingglass") }
+                    .accessibilityLabel("Zoom in")
+            }
+
             if hasObjects {
                 Toggle(isOn: $editMode) { Image(systemName: "arrow.up.and.down.and.arrow.left.and.right") }
                     .toggleStyle(.button)
@@ -187,19 +230,26 @@ struct NoteEditorView: View {
                     editMode = false
                     presenting = true
                 }
-                Button("Pages", systemImage: "square.stack") { showPages = true }
-                Button("Add page", systemImage: "plus.square") {
-                    note.pages.append(NotePage())
-                    scheduleSave()
+                if !note.isWhiteboard {
+                    Button("Pages", systemImage: "square.stack") { showPages = true }
+                    Button("Add page", systemImage: "plus.square") {
+                        note.pages.append(NotePage())
+                        scheduleSave()
+                    }
                 }
                 Button("Handwriting to text", systemImage: "text.viewfinder") { convertHandwriting() }
-                Button("Change template", systemImage: "square.grid.2x2") { showTemplateMenu = true }
-                Button("Save page as template", systemImage: "square.and.arrow.down") {
-                    templateName = ""
-                    showSaveTemplate = true
+                Button(note.isWhiteboard ? "Change background" : "Change template", systemImage: "square.grid.2x2") { showTemplateMenu = true }
+                if !note.isWhiteboard {
+                    Toggle(isOn: Binding(get: { note.pageNumbers }, set: { note.pageNumbers = $0; scheduleSave() })) {
+                        Label("Page numbers", systemImage: "number")
+                    }
+                    Button("Save page as template", systemImage: "square.and.arrow.down") {
+                        templateName = ""
+                        showSaveTemplate = true
+                    }
+                    Button("Delete page", systemImage: "trash", role: .destructive) { deleteActivePage() }
+                        .disabled(note.pages.count < 2)
                 }
-                Button("Delete page", systemImage: "trash", role: .destructive) { deleteActivePage() }
-                    .disabled(note.pages.count < 2)
             } label: { Image(systemName: "ellipsis.circle") }
 
             Button("Export") { saveTask?.cancel(); store.update(note); showExport = true }
@@ -260,6 +310,14 @@ struct NoteEditorView: View {
 
     // MARK: Pages
 
+    private var subtitle: String {
+        switch note.kind {
+        case .whiteboard: "Whiteboard · \(Int(pageSize.width)) × \(Int(pageSize.height))"
+        case .notebook: "Notebook · \(note.pages.count) page\(note.pages.count == 1 ? "" : "s")"
+        case .note: "\(note.template.title) · \(note.pages.count) page\(note.pages.count == 1 ? "" : "s")"
+        }
+    }
+
     private func activeIndex() -> Int {
         note.pages.firstIndex { $0.id == activePageID } ?? 0
     }
@@ -281,9 +339,11 @@ struct NoteEditorView: View {
 
     private func insert(_ image: UIImage) {
         guard let file = store.saveImage(image) else { return }
-        let w = min(320, Double(image.size.width))
+        let w = min(320, pageSize.width * 0.6, Double(image.size.width))
         let h = w * Double(image.size.height / image.size.width)
-        let placed = PlacedImage(file: file, x: (pageSize.width - w) / 2, y: 200, width: w, height: h)
+        // Whiteboards are huge, so a picture goes in the middle; pages put it near the top.
+        let y = note.isWhiteboard ? (pageSize.height - h) / 2 : min(200, pageSize.height * 0.15)
+        let placed = PlacedImage(file: file, x: (pageSize.width - w) / 2, y: y, width: w, height: h)
         note.pages[activeIndex()].images.append(placed)
         editMode = true   // let the user position it straight away
         scheduleSave()
@@ -295,8 +355,15 @@ struct NoteEditorView: View {
         var object = PageObject.make(kind, text: text)
         let page = activeIndex()
         let offset = Double(note.pages[page].objects.count % 8) * 36
-        object.x += offset
-        object.y += offset
+        // Keep objects inside small pages (A6 is only 397 points wide). Whiteboards are huge, so start in the middle.
+        object.width = min(object.width, max(80, pageSize.width - 80))
+        if note.isWhiteboard {
+            object.x = (pageSize.width - object.width) / 2 + offset
+            object.y = pageSize.height / 2 - 60 + offset
+        } else {
+            object.x = min(object.x + offset, max(20, pageSize.width - object.width - 20))
+            object.y = min(object.y + offset, max(20, pageSize.height - 200))
+        }
         note.pages[page].objects.append(object)
         editMode = true
         selectedID = object.id
@@ -366,18 +433,44 @@ struct NoteEditorView: View {
 
 // MARK: - Page
 
+/// Everything about how a page's paper looks, passed down from the note.
+struct PaperStyle {
+    var size: CGSize
+    var paperHex: String
+    var template: TemplateKind
+    var whiteboard: Bool
+    var showNumber: Bool
+    var number: Int
+}
+
 struct PageView: View {
     @Binding var page: NotePage
-    let template: TemplateKind
+    let style: PaperStyle
     let editMode: Bool
     let selectedID: UUID?
     var onSelect: (UUID?) -> Void
     var onActivate: () -> Void
     var onChange: () -> Void
 
+    @ViewBuilder
+    private var paper: some View {
+        if let background = page.background.flatMap({ ImageCache.image($0) }) {
+            Image(uiImage: background).resizable()
+        } else if style.whiteboard {
+            ZStack {
+                Color(hex: style.paperHex)
+                if let tile = TemplateKind.whiteboardTile(style.template, paperHex: style.paperHex) {
+                    Image(uiImage: tile).resizable(resizingMode: .tile)
+                }
+            }
+        } else {
+            Image(uiImage: style.template.image(size: style.size, paperHex: style.paperHex)).resizable()
+        }
+    }
+
     var body: some View {
         ZStack(alignment: .topLeading) {
-            Image(uiImage: page.background.flatMap { ImageCache.image($0) } ?? template.image).resizable()
+            paper
             if editMode {
                 Color.clear
                     .contentShape(Rectangle())
@@ -419,8 +512,17 @@ struct PageView: View {
             }
             InkCanvas(data: $page.drawing, allowsInput: !editMode, onActivate: onActivate, onChange: onChange)
         }
+        .overlay(alignment: .bottom) {
+            if style.showNumber {
+                Text("\(style.number)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color(red: 0.36, green: 0.40, blue: 0.45))
+                    .padding(.bottom, 14)
+                    .allowsHitTesting(false)
+            }
+        }
         .coordinateSpace(name: "page")
-        .background(Color.white)
+        .background(Color(hex: style.paperHex))
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .shadow(color: .black.opacity(0.14), radius: 8, y: 2)
     }

@@ -3,7 +3,10 @@
 iPad Air notes app for Apple Pencil Pro. SwiftUI + PencilKit, iPadOS 17.5+.
 
 - Handwriting with the system PencilKit tool palette (squeeze, barrel roll and haptics come from PencilKit)
-- Folders, 8 built-in templates, and "save page as template"
+- The plus button offers **New note**, **New notebook…** (cover colour, paper size A4/A5/A6/B5/Letter/Legal,
+  portrait or landscape, paper style and colour, page numbers, number of pages) and **New whiteboard…**
+  (a big zoomable page: small to huge, plain, grid or dots)
+- Folders, 16 built-in templates, and "save page as template"
 - Insert photos from the library or take one with the camera, then move and resize
 - Export: PDF, Word (.docx), PNG, plain text, RTF, Inkwell backup. Print too.
 - Text, Word and RTF exports use on-device handwriting recognition (Apple Vision)

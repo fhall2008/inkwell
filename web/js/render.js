@@ -1,5 +1,5 @@
 // Draws a page (template, pictures, objects, ink) onto a canvas. Shared by the editor, thumbnails and exports.
-import { PAGE_W, PAGE_H, drawTemplate } from './templates.js';
+import { PAGE_W, PAGE_H, drawTemplateFitted, drawBoard } from './templates.js';
 
 const FAMILIES = {
   sans: '-apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif',
@@ -159,15 +159,41 @@ export function drawObject(ctx, o) {
   ctx.restore();
 }
 
-/** Template (or imported page), pictures and objects. `images` maps image id -> loaded image. */
-export function drawPaper(ctx, page, template, images, { objects = true, pictures = true } = {}) {
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(0, 0, PAGE_W, PAGE_H);
+/** How one page of a note looks: its size, template, paper colour and page number. Notes made before
+ *  notebooks and whiteboards existed have none of these fields, and are A4 on white paper. */
+export function pageSpec(note, index = 0) {
+  const whiteboard = note.kind === 'whiteboard';
+  return {
+    w: note.pageWidth || PAGE_W,
+    h: note.pageHeight || PAGE_H,
+    template: note.template,
+    paper: note.paper || '#FFFFFF',
+    whiteboard,
+    numbers: !!note.pageNumbers && !whiteboard,
+    number: index + 1,
+  };
+}
+
+/** Paper, template (or imported page), page number, pictures and objects. `images` maps image id -> loaded image. */
+export function drawPaper(ctx, page, spec, images, { objects = true, pictures = true } = {}) {
+  ctx.fillStyle = spec.paper;
+  ctx.fillRect(0, 0, spec.w, spec.h);
   if (page.background) {
     const bg = images.get(page.background);
-    if (bg) ctx.drawImage(bg, 0, 0, PAGE_W, PAGE_H);
+    if (bg) ctx.drawImage(bg, 0, 0, spec.w, spec.h);
+  } else if (spec.whiteboard) {
+    drawBoard(ctx, spec.template, spec.w, spec.h);
   } else {
-    drawTemplate(ctx, template, PAGE_W, PAGE_H);
+    drawTemplateFitted(ctx, spec.template, spec.w, spec.h);
+  }
+  if (spec.numbers) {
+    ctx.save();
+    ctx.font = '11px -apple-system, Helvetica, Arial, sans-serif';
+    ctx.fillStyle = '#5c6673';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(String(spec.number), spec.w / 2, spec.h - 18);
+    ctx.restore();
   }
   if (pictures) {
     for (const im of page.images || []) {
@@ -250,13 +276,15 @@ export function distanceToStroke(s, x, y) {
 }
 
 /** A page flattened to a canvas, for exports. */
-export function flattenPage(page, template, images, scale = 2, objects = true) {
+export function flattenPage(page, spec, images, scale = 2, objects = true) {
+  // A huge whiteboard would otherwise need a bitmap bigger than the browser allows.
+  const k = Math.min(scale, 4096 / Math.max(spec.w, spec.h));
   const canvas = document.createElement('canvas');
-  canvas.width = Math.round(PAGE_W * scale);
-  canvas.height = Math.round(PAGE_H * scale);
+  canvas.width = Math.round(spec.w * k);
+  canvas.height = Math.round(spec.h * k);
   const ctx = canvas.getContext('2d');
-  ctx.scale(scale, scale);
-  drawPaper(ctx, page, template, images, { objects });
+  ctx.scale(k, k);
+  drawPaper(ctx, page, spec, images, { objects });
   drawInk(ctx, page);
   return canvas;
 }

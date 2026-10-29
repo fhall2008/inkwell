@@ -66,6 +66,14 @@ struct WireNote: Codable {
     var template: String
     var modified: Double     // milliseconds since 1970
     var pages: [WirePage]
+    // Notebooks and whiteboards. All optional so older notes (and older apps) still work: a note without
+    // them is an A4 portrait page on white paper.
+    var kind: String?        // "note" | "notebook" | "whiteboard"
+    var pageWidth: Double?   // page size in points at 96 dpi
+    var pageHeight: Double?
+    var cover: String?       // notebook cover colour, "#RRGGBB"
+    var paper: String?       // paper colour, "#RRGGBB"
+    var pageNumbers: Bool?
 }
 
 struct WireFolder: Codable {
@@ -108,7 +116,13 @@ enum SyncMapper {
             folderId: note.folderID?.uuidString,
             template: note.template.rawValue,
             modified: note.modified.timeIntervalSince1970 * 1000,
-            pages: note.pages.map(wirePage)
+            pages: note.pages.map { wirePage($0) },
+            kind: note.kind.rawValue,
+            pageWidth: note.pageWidth,
+            pageHeight: note.pageHeight,
+            cover: note.coverHex,
+            paper: note.paperHex,
+            pageNumbers: note.pageNumbers
         )
     }
 
@@ -139,7 +153,13 @@ enum SyncMapper {
             folderID: wire.folderId.flatMap { UUID(uuidString: $0) },
             template: TemplateKind(rawValue: wire.template) ?? .ruled,
             pages: pages,
-            modified: Date(timeIntervalSince1970: wire.modified / 1000)
+            modified: Date(timeIntervalSince1970: wire.modified / 1000),
+            kind: wire.kind.flatMap { NoteKind(rawValue: $0) } ?? .note,
+            pageWidth: max(100, wire.pageWidth ?? 794),
+            pageHeight: max(100, wire.pageHeight ?? 1123),
+            coverHex: wire.cover,
+            paperHex: wire.paper ?? "#FFFFFF",
+            pageNumbers: wire.pageNumbers ?? false
         )
     }
 

@@ -18,6 +18,8 @@ struct LibraryView: View {
     @State private var selection: SidebarItem? = .all
     @State private var search = ""
     @State private var showTemplates = false
+    @State private var showNotebookSetup = false
+    @State private var showWhiteboardSetup = false
     @State private var openNote: OpenNote?
     @State private var showNewFolder = false
     @State private var folderName = ""
@@ -53,6 +55,12 @@ struct LibraryView: View {
             TemplatePickerView(folderID: currentFolder?.id) { note in
                 openNote = OpenNote(id: note.id)
             }
+        }
+        .sheet(isPresented: $showNotebookSetup) {
+            NotebookSetupView(folderID: currentFolder?.id) { note in openNote = OpenNote(id: note.id) }
+        }
+        .sheet(isPresented: $showWhiteboardSetup) {
+            WhiteboardSetupView(folderID: currentFolder?.id) { note in openNote = OpenNote(id: note.id) }
         }
         .fullScreenCover(item: $openNote) { open in
             if let note = store.note(open.id) {
@@ -154,8 +162,15 @@ struct LibraryView: View {
                 Button { importing = true } label: { Label("Import PDF, Word or backup", systemImage: "square.and.arrow.down") }
             }
             ToolbarItem {
-                Button { showTemplates = true } label: { Label("New note", systemImage: "plus") }
-                    .buttonStyle(.borderedProminent)
+                Menu {
+                    Button { showTemplates = true } label: { Label("New note", systemImage: "doc.text") }
+                    Button { showNotebookSetup = true } label: { Label("New notebook…", systemImage: "book.closed") }
+                    Button { showWhiteboardSetup = true } label: { Label("New whiteboard…", systemImage: "rectangle.and.pencil.and.ellipsis") }
+                } label: {
+                    Label("New", systemImage: "plus")
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityLabel("New note, notebook or whiteboard")
             }
         }
     }
@@ -170,6 +185,14 @@ struct NoteCard: View {
         store.folders.first { $0.id == note.folderID }?.name ?? "No folder"
     }
 
+    private var kindLabel: String {
+        switch note.kind {
+        case .note: ""
+        case .notebook: "Notebook · "
+        case .whiteboard: "Whiteboard · "
+        }
+    }
+
     var body: some View {
         Button(action: open) {
             VStack(alignment: .leading, spacing: 8) {
@@ -179,7 +202,7 @@ struct NoteCard: View {
                     .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.hairline))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(note.title).font(.headline).foregroundStyle(Theme.ink).lineLimit(1)
-                    Text("\(folderName) · \(note.modified.formatted(.relative(presentation: .named)))")
+                    Text("\(folderName) · \(kindLabel)\(note.modified.formatted(.relative(presentation: .named)))")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 4)
@@ -205,12 +228,32 @@ struct ThumbnailView: View {
 
     var body: some View {
         ZStack {
-            Color.white
+            Color(hex: note.paperHex)
             if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                if note.pageWidth > note.pageHeight {
+                    // Landscape pages and whiteboards: show the whole thing.
+                    Image(uiImage: image).resizable().scaledToFit()
+                } else {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                }
+            }
+        }
+        .overlay(alignment: .leading) {
+            // A notebook's cover colour runs down its spine.
+            if note.kind == .notebook, let hex = note.coverHex {
+                Rectangle().fill(Color(hex: hex)).frame(width: 12)
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if note.kind != .note {
+                Image(systemName: note.kind == .whiteboard ? "rectangle.and.pencil.and.ellipsis" : "book.closed.fill")
+                    .font(.caption)
+                    .padding(7)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .padding(6)
             }
         }
         .task(id: note.modified) {
