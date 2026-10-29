@@ -92,6 +92,47 @@ struct CheckItem: Identifiable, Codable, Hashable {
     var done = false
 }
 
+/// The outline drawn around a stamp or watermark.
+enum StampBorder: String, Codable, CaseIterable, Identifiable {
+    case none, box, rounded, oval, double
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .none: "None"
+        case .box: "Box"
+        case .rounded: "Rounded"
+        case .oval: "Oval"
+        case .double: "Double"
+        }
+    }
+}
+
+/// A stamp the person made and saved, so it can be used again. It syncs between devices.
+struct CustomStamp: Identifiable, Codable, Hashable {
+    var id = UUID()
+    var name: String
+    var text: String
+    var colorHex = "#C0392B"
+    var fontSize = 26.0
+    var bold = true
+    var border = StampBorder.rounded
+    var rotation = -8.0
+    var opacity = 1.0
+}
+
+/// Text laid across every page of a note, behind everything else: "DRAFT", "CONFIDENTIAL" and so on.
+struct Watermark: Codable, Equatable {
+    var text: String
+    var colorHex = "#8C99B3"
+    var opacity = 0.18
+    var angle = -35.0
+    var size = 120.0
+    var border = StampBorder.none
+    var tiled = false
+}
+
 /// Anything you can place on a page above the template: text, shapes, sticky notes, checklists, tables, stamps.
 struct PageObject: Identifiable, Codable, Hashable {
     var id = UUID()
@@ -111,6 +152,32 @@ struct PageObject: Identifiable, Codable, Hashable {
     var list = ListStyle.none
     var items: [CheckItem] = []   // checklist
     var cells: [[String]] = []    // table
+    var rotation = 0.0            // degrees, for shapes, stamps and sticky notes
+    var opacity = 1.0
+    var border = StampBorder.rounded   // stamps only
+
+    /// A page object from a saved custom stamp.
+    static func stamp(from saved: CustomStamp) -> PageObject {
+        var o = make(.stamp, text: saved.text)
+        o.colorHex = saved.colorHex
+        o.fontSize = saved.fontSize
+        o.bold = saved.bold
+        o.border = saved.border
+        o.rotation = saved.rotation
+        o.opacity = saved.opacity
+        // Size the box to the words: roughly 0.62 of the font size per capital letter, and a line is 2.1 sizes tall.
+        let lines = saved.text.split(separator: "\n", omittingEmptySubsequences: false)
+        let longest = lines.map(\.count).max() ?? 1
+        o.width = max(110, Double(longest) * saved.fontSize * 0.62 + 44)
+        o.height = max(48, Double(max(1, lines.count)) * saved.fontSize * 1.3 + 26)
+        return o
+    }
+
+    /// A reusable stamp made from this object (only meaningful for stamps).
+    func asCustomStamp(named name: String) -> CustomStamp {
+        CustomStamp(name: name, text: text, colorHex: colorHex, fontSize: fontSize, bold: bold,
+                    border: border, rotation: rotation, opacity: opacity)
+    }
 
     static func make(_ kind: ObjectKind, text: String = "") -> PageObject {
         var o = PageObject(kind: kind, x: 80, y: 160, width: 220, height: 120)
@@ -153,6 +220,33 @@ struct PageObject: Identifiable, Codable, Hashable {
         default:
             return nil
         }
+    }
+}
+
+extension PageObject {
+    /// Tolerant decoding so objects saved before tilt, opacity and borders existed (and objects from the web) still open.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        kind = try c.decode(ObjectKind.self, forKey: .kind)
+        x = try c.decode(Double.self, forKey: .x)
+        y = try c.decode(Double.self, forKey: .y)
+        width = try c.decode(Double.self, forKey: .width)
+        height = try c.decode(Double.self, forKey: .height)
+        colorHex = try c.decodeIfPresent(String.self, forKey: .colorHex) ?? "#1B2430"
+        fillHex = try c.decodeIfPresent(String.self, forKey: .fillHex)
+        lineWidth = try c.decodeIfPresent(Double.self, forKey: .lineWidth) ?? 3
+        text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
+        fontSize = try c.decodeIfPresent(Double.self, forKey: .fontSize) ?? 18
+        design = try c.decodeIfPresent(TextDesign.self, forKey: .design) ?? .sans
+        bold = try c.decodeIfPresent(Bool.self, forKey: .bold) ?? false
+        italic = try c.decodeIfPresent(Bool.self, forKey: .italic) ?? false
+        list = try c.decodeIfPresent(ListStyle.self, forKey: .list) ?? .none
+        items = try c.decodeIfPresent([CheckItem].self, forKey: .items) ?? []
+        cells = try c.decodeIfPresent([[String]].self, forKey: .cells) ?? []
+        rotation = try c.decodeIfPresent(Double.self, forKey: .rotation) ?? 0
+        opacity = try c.decodeIfPresent(Double.self, forKey: .opacity) ?? 1
+        border = try c.decodeIfPresent(StampBorder.self, forKey: .border) ?? .rounded
     }
 }
 
@@ -277,6 +371,7 @@ struct Note: Identifiable, Codable {
     var coverHex: String?
     var paperHex: String = "#FFFFFF"
     var pageNumbers = false
+    var watermark: Watermark?
 
     var pageSize: CGSize { CGSize(width: pageWidth, height: pageHeight) }
     var isWhiteboard: Bool { kind == .whiteboard }
@@ -303,6 +398,7 @@ extension Note {
         coverHex = try c.decodeIfPresent(String.self, forKey: .coverHex)
         paperHex = try c.decodeIfPresent(String.self, forKey: .paperHex) ?? "#FFFFFF"
         pageNumbers = try c.decodeIfPresent(Bool.self, forKey: .pageNumbers) ?? false
+        watermark = try c.decodeIfPresent(Watermark.self, forKey: .watermark)
     }
 }
 

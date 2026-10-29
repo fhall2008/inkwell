@@ -74,6 +74,13 @@ struct WireNote: Codable {
     var cover: String?       // notebook cover colour, "#RRGGBB"
     var paper: String?       // paper colour, "#RRGGBB"
     var pageNumbers: Bool?
+    var watermark: Watermark?
+}
+
+/// The person's saved custom stamps (object "stamps").
+struct WireStamps: Codable {
+    var v = 1
+    var stamps: [CustomStamp]
 }
 
 struct WireFolder: Codable {
@@ -122,7 +129,8 @@ enum SyncMapper {
             pageHeight: note.pageHeight,
             cover: note.coverHex,
             paper: note.paperHex,
-            pageNumbers: note.pageNumbers
+            pageNumbers: note.pageNumbers,
+            watermark: note.watermark
         )
     }
 
@@ -159,7 +167,8 @@ enum SyncMapper {
             pageHeight: max(100, wire.pageHeight ?? 1123),
             coverHex: wire.cover,
             paperHex: wire.paper ?? "#FFFFFF",
-            pageNumbers: wire.pageNumbers ?? false
+            pageNumbers: wire.pageNumbers ?? false,
+            watermark: wire.watermark
         )
     }
 

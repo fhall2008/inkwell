@@ -40,6 +40,11 @@ enum PageRenderer {
                 }
             }
 
+            // The watermark sits above the paper but behind pictures, objects and ink.
+            if let watermark = note.watermark, !note.isWhiteboard {
+                WatermarkRenderer.draw(watermark, in: size)
+            }
+
             if note.pageNumbers && !note.isWhiteboard {
                 drawPageNumber(number, in: size)
             }

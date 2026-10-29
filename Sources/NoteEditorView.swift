@@ -19,6 +19,11 @@ struct NoteEditorView: View {
     @State private var alertText: String?
     @State private var saveTask: Task<Void, Never>?
     @State private var presenting = false
+    @State private var showStampLibrary = false
+    @State private var showStampEditor = false
+    @State private var showWatermark = false
+    @State private var deleted: DeletedObject?
+    @State private var undoTask: Task<Void, Never>?
     @State private var zoom: CGFloat?          // whiteboards only; nil means "fit the whole board"
     @State private var pinchBase: CGFloat?
     @State private var boardFit: CGFloat = 0.4
@@ -38,7 +43,8 @@ struct NoteEditorView: View {
             template: note.template,
             whiteboard: note.isWhiteboard,
             showNumber: note.pageNumbers && !note.isWhiteboard,
-            number: (note.pages.firstIndex { $0.id == id } ?? 0) + 1
+            number: (note.pages.firstIndex { $0.id == id } ?? 0) + 1,
+            watermark: note.isWhiteboard ? nil : note.watermark
         )
     }
 
@@ -65,6 +71,7 @@ struct NoteEditorView: View {
                                     selectedID: selectedID,
                                     onSelect: { selectedID = $0 },
                                     onActivate: { activePageID = page.id },
+                                    onDeleteObject: { deleteObject($0) },
                                     onChange: scheduleSave
                                 )
                                 .frame(width: pageSize.width, height: pageSize.height)
@@ -114,6 +121,7 @@ struct NoteEditorView: View {
             .overlay(alignment: .bottom) {
                 VStack(spacing: 8) {
                     dictationBar
+                    undoBar
                     inspector
                 }
             }
@@ -123,6 +131,9 @@ struct NoteEditorView: View {
             .statusBarHidden(presenting)
         }
         .sheet(isPresented: $showExport) { ExportSheet(note: note) }
+        .sheet(isPresented: $showStampLibrary) { StampLibrarySheet { addCustomStamp($0) } }
+        .sheet(isPresented: $showStampEditor) { StampEditorSheet { addCustomStamp($0) } }
+        .sheet(isPresented: $showWatermark) { WatermarkSheet(note: $note, onChange: scheduleSave) }
         .sheet(isPresented: $showPages) {
             PageManagerSheet(note: $note, onJump: { jumpTo = $0 }, onChange: scheduleSave)
         }
@@ -196,11 +207,25 @@ struct NoteEditorView: View {
                 Button("Sticky note", systemImage: ObjectKind.sticky.icon) { addObject(.sticky) }
                 Button("Checklist", systemImage: ObjectKind.checklist.icon) { addObject(.checklist) }
                 Button("Table", systemImage: ObjectKind.table.icon) { addObject(.table) }
+                Menu("Shapes", systemImage: "square.on.circle") {
+                    ForEach(ObjectKind.shapes) { kind in
+                        Button(kind.title, systemImage: kind.icon) { addObject(kind) }
+                    }
+                }
                 Menu("Stamp", systemImage: ObjectKind.stamp.icon) {
                     ForEach(Self.stamps, id: \.self) { s in Button(s) { addObject(.stamp, text: s) } }
                     Button(Date.now.formatted(date: .abbreviated, time: .omitted)) {
                         addObject(.stamp, text: Date.now.formatted(date: .abbreviated, time: .omitted))
                     }
+                    if !store.customStamps.isEmpty {
+                        Divider()
+                        ForEach(store.customStamps.prefix(8)) { saved in
+                            Button(saved.name) { addCustomStamp(saved) }
+                        }
+                    }
+                    Divider()
+                    Button("My stamps…", systemImage: "star") { showStampLibrary = true }
+                    Button("Make a custom stamp…", systemImage: "plus") { showStampEditor = true }
                 }
             } label: { Image(systemName: "plus.square.on.square") }
                 .accessibilityLabel("Insert")
@@ -243,6 +268,9 @@ struct NoteEditorView: View {
                     Toggle(isOn: Binding(get: { note.pageNumbers }, set: { note.pageNumbers = $0; scheduleSave() })) {
                         Label("Page numbers", systemImage: "number")
                     }
+                    Button(note.watermark == nil ? "Add watermark…" : "Edit watermark…", systemImage: "drop.halffull") {
+                        showWatermark = true
+                    }
                     Button("Save page as template", systemImage: "square.and.arrow.down") {
                         templateName = ""
                         showSaveTemplate = true
@@ -265,8 +293,23 @@ struct NoteEditorView: View {
             ObjectInspector(
                 o: Binding(get: { findObject(id) ?? current }, set: { setObject($0) }),
                 onDuplicate: { duplicateObject(id) },
-                onDelete: { deleteObject(id) }
+                onDelete: { deleteObject(id) },
+                onSaveStamp: current.kind == .stamp ? { saveSelectedStamp(id) } : nil
             )
+        }
+    }
+
+    @ViewBuilder
+    private var undoBar: some View {
+        if let gone = deleted {
+            HStack(spacing: 14) {
+                Image(systemName: "trash")
+                Text("\(gone.object.kind.title) deleted")
+                Button("Undo", action: restoreDeleted).buttonStyle(.borderedProminent)
+            }
+            .padding(12)
+            .background(.regularMaterial, in: Capsule())
+            .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
 
@@ -352,7 +395,15 @@ struct NoteEditorView: View {
     // MARK: Objects
 
     private func addObject(_ kind: ObjectKind, text: String = "") {
-        var object = PageObject.make(kind, text: text)
+        place(PageObject.make(kind, text: text))
+    }
+
+    private func addCustomStamp(_ stamp: CustomStamp) {
+        place(PageObject.stamp(from: stamp))
+    }
+
+    private func place(_ made: PageObject) {
+        var object = made
         let page = activeIndex()
         let offset = Double(note.pages[page].objects.count % 8) * 36
         // Keep objects inside small pages (A6 is only 397 points wide). Whiteboards are huge, so start in the middle.
@@ -402,9 +453,41 @@ struct NoteEditorView: View {
     }
 
     private func deleteObject(_ id: UUID) {
-        for p in note.pages.indices { note.pages[p].objects.removeAll { $0.id == id } }
+        for p in note.pages.indices {
+            if let i = note.pages[p].objects.firstIndex(where: { $0.id == id }) {
+                let removed = note.pages[p].objects.remove(at: i)
+                // Keep it for a few seconds so a slip can be undone.
+                deleted = DeletedObject(pageID: note.pages[p].id, index: i, object: removed)
+                undoTask?.cancel()
+                undoTask = Task {
+                    try? await Task.sleep(for: .seconds(8))
+                    guard !Task.isCancelled else { return }
+                    withAnimation { deleted = nil }
+                }
+                break
+            }
+        }
         selectedID = nil
         scheduleSave()
+    }
+
+    private func restoreDeleted() {
+        undoTask?.cancel()
+        guard let gone = deleted, let p = note.pages.firstIndex(where: { $0.id == gone.pageID }) else {
+            deleted = nil
+            return
+        }
+        note.pages[p].objects.insert(gone.object, at: min(gone.index, note.pages[p].objects.count))
+        selectedID = gone.object.id
+        withAnimation { deleted = nil }
+        scheduleSave()
+    }
+
+    private func saveSelectedStamp(_ id: UUID) {
+        guard let stamp = findObject(id), stamp.kind == .stamp else { return }
+        let name = stamp.text.replacingOccurrences(of: "\n", with: " ")
+        store.saveStamp(stamp.asCustomStamp(named: name.isEmpty ? "My stamp" : name))
+        alertText = "Saved to My stamps. You can use it again from Insert, then Stamp, then My stamps."
     }
 
     // MARK: Speech and handwriting
@@ -434,6 +517,13 @@ struct NoteEditorView: View {
 // MARK: - Page
 
 /// Everything about how a page's paper looks, passed down from the note.
+/// An object just deleted, kept briefly so "Undo" can put it back where it was.
+struct DeletedObject {
+    let pageID: UUID
+    let index: Int
+    let object: PageObject
+}
+
 struct PaperStyle {
     var size: CGSize
     var paperHex: String
@@ -441,6 +531,7 @@ struct PaperStyle {
     var whiteboard: Bool
     var showNumber: Bool
     var number: Int
+    var watermark: Watermark?
 }
 
 struct PageView: View {
@@ -450,6 +541,7 @@ struct PageView: View {
     let selectedID: UUID?
     var onSelect: (UUID?) -> Void
     var onActivate: () -> Void
+    var onDeleteObject: (UUID) -> Void
     var onChange: () -> Void
 
     @ViewBuilder
@@ -471,6 +563,13 @@ struct PageView: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             paper
+            if let watermark = style.watermark {
+                Image(uiImage: WatermarkRenderer.image(watermark, size: style.size))
+                    .resizable()
+                    .frame(width: style.size.width, height: style.size.height)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
             if editMode {
                 Color.clear
                     .contentShape(Rectangle())
@@ -502,11 +601,7 @@ struct PageView: View {
                         onSelect(copy.id)
                         onChange()
                     },
-                    onDelete: {
-                        page.objects.removeAll { $0.id == object.id }
-                        onSelect(nil)
-                        onChange()
-                    },
+                    onDelete: { onDeleteObject(object.id) },
                     onChange: onChange
                 )
             }

@@ -4,6 +4,22 @@ import UIKit
 /// Mirrors the on-screen views in ObjectViews.swift.
 enum ObjectDrawing {
     static func draw(_ o: PageObject) {
+        guard let ctx = UIGraphicsGetCurrentContext() else { return }
+        ctx.saveGState()
+        if o.opacity < 1 { ctx.setAlpha(CGFloat(o.opacity)) }
+        if o.rotation != 0 {
+            // Tilt around the middle of the object, like the on-screen view.
+            let cx = CGFloat(o.x + o.width / 2)
+            let cy = CGFloat(o.y + (o.layoutHeight ?? o.height) / 2)
+            ctx.translateBy(x: cx, y: cy)
+            ctx.rotate(by: CGFloat(o.rotation) * .pi / 180)
+            ctx.translateBy(x: -cx, y: -cy)
+        }
+        drawBody(o)
+        ctx.restoreGState()
+    }
+
+    private static func drawBody(_ o: PageObject) {
         let ink = UIColor(hex: o.colorHex)
         let x = CGFloat(o.x), y = CGFloat(o.y), w = CGFloat(o.width)
 
@@ -75,12 +91,18 @@ enum ObjectDrawing {
         case .stamp:
             let r = CGRect(x: x, y: y, width: w, height: CGFloat(o.height))
             ink.setStroke()
-            let border = UIBezierPath(roundedRect: r.insetBy(dx: 1.5, dy: 1.5), cornerRadius: 8)
-            border.lineWidth = 3
-            border.stroke()
-            let label = o.text.uppercased()
-            let size = (label as NSString).size(withAttributes: [.font: o.uiFont])
-            text(label, in: CGRect(x: r.midX - size.width / 2, y: r.midY - size.height / 2, width: size.width + 2, height: size.height), o, ink)
+            let outline = UIBezierPath(cgPath: StampBorderShape(border: o.border).path(in: CGRect(origin: .zero, size: r.size)).cgPath)
+            outline.apply(CGAffineTransform(translationX: x, y: y))
+            outline.lineWidth = 3
+            outline.stroke()
+            let label = o.text.uppercased() as NSString
+            let style = NSMutableParagraphStyle()
+            style.alignment = .center
+            let attributes: [NSAttributedString.Key: Any] = [.font: o.uiFont, .foregroundColor: ink, .paragraphStyle: style]
+            let bound = label.boundingRect(with: CGSize(width: r.width - 12, height: 4000),
+                                           options: .usesLineFragmentOrigin, attributes: attributes, context: nil)
+            label.draw(in: CGRect(x: r.minX + 6, y: r.midY - bound.height / 2, width: r.width - 12, height: bound.height),
+                       withAttributes: attributes)
         }
     }
 

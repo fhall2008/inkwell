@@ -1,9 +1,12 @@
 // The note editor: pages with pen, highlighter and eraser, plus text boxes, sticky notes,
 // checklists, tables, stamps and pictures that can be moved and resized in "edit objects" mode.
 
-import { h, clear, toast, popMenu, download, safeFilename } from './dom.js';
+import { h, clear, toast, popMenu, modal, download, safeFilename } from './dom.js';
 import { PAGE_W, PAGE_H, TEMPLATES, WHITEBOARD_BACKGROUNDS, templateTitle } from './templates.js';
-import { drawPaper, drawInk, drawStroke, distanceToStroke, flattenPage, pageSpec, objectFont, rowHeight, layoutHeight } from './render.js';
+import {
+  drawPaper, drawInk, drawStroke, distanceToStroke, flattenPage, pageSpec, objectFont, rowHeight, layoutHeight,
+  SHAPE_KINDS, BORDERS, shapePath,
+} from './render.js';
 import { newPage, uuid } from './store.js';
 
 const COLORS = ['#1B2430', '#2F5BEA', '#D97757', '#4FB286', '#C0392B', '#8E44AD'];
@@ -39,14 +42,36 @@ const store = {
   },
 };
 
+const KIND_NAMES = {
+  text: 'Text box', sticky: 'Sticky note', checklist: 'Checklist', table: 'Table', stamp: 'Stamp',
+  line: 'Line', arrow: 'Arrow', rectangle: 'Rectangle', ellipse: 'Circle', triangle: 'Triangle', star: 'Star',
+};
+const WATERMARK_COLOURS = [['Grey', '#8C99B3'], ['Red', '#C0392B'], ['Blue', '#2F5BEA'], ['Green', '#2E8B57'], ['Black', '#1B2430']];
+const WATERMARK_PICKS = ['DRAFT', 'CONFIDENTIAL', 'COPY', 'SAMPLE', 'DO NOT COPY', 'FOR REVIEW'];
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/** Shapes and stamps have no text field in the way, so they can be dragged from anywhere on them. */
+const movableByBody = (o) => SHAPE_KINDS.includes(o.kind) || o.kind === 'stamp';
+
 /** New object with the same fields the iPad app uses. */
 export function makeObject(kind, text = '') {
   const o = {
     id: uuid(), kind, x: 80, y: 160, width: 220, height: 120,
     colorHex: '#1B2430', fillHex: null, lineWidth: 3, text: '', fontSize: 18,
     design: 'sans', bold: false, italic: false, list: 'none', items: [], cells: [],
+    rotation: 0, opacity: 1, border: 'rounded',
   };
   switch (kind) {
+    case 'line':
+    case 'arrow':
+      o.width = 240; o.height = 30;
+      break;
+    case 'triangle':
+      o.width = 180; o.height = 150;
+      break;
+    case 'star':
+      o.width = 160; o.height = 160; o.fillHex = '#FFD84D';
+      break;
     case 'text':
       o.width = 400; o.height = 40; o.text = text;
       break;
@@ -67,6 +92,26 @@ export function makeObject(kind, text = '') {
   }
   return o;
 }
+
+/** A page object from a saved custom stamp. Sized to its words, the same way the iPad does it. */
+export function stampObject(saved) {
+  const o = makeObject('stamp', saved.text);
+  Object.assign(o, {
+    colorHex: saved.colorHex, fontSize: saved.fontSize, bold: saved.bold, border: saved.border,
+    rotation: saved.rotation, opacity: saved.opacity,
+  });
+  const lines = String(saved.text).split('\n');
+  const longest = Math.max(1, ...lines.map((l) => l.length));
+  o.width = Math.max(110, longest * saved.fontSize * 0.62 + 44);
+  o.height = Math.max(48, lines.length * saved.fontSize * 1.3 + 26);
+  return o;
+}
+
+/** The look of a stamp on the page, saved so it can be reused. */
+const stampFromObject = (o) => ({
+  name: (o.text || '').replace(/\n/g, ' ').trim() || 'My stamp', text: o.text || '', colorHex: o.colorHex,
+  fontSize: o.fontSize, bold: !!o.bold, border: o.border || 'rounded', rotation: o.rotation || 0, opacity: o.opacity ?? 1,
+});
 
 const objectHeight = (o) => (o.kind === 'text' ? null : o.kind === 'checklist' || o.kind === 'table' ? layoutHeight(o) : o.height);
 
@@ -110,8 +155,12 @@ class PageView {
   }
 
   applySize(scale) {
-    this.scale = scale;
     const { pw, ph } = this;
+    // The layout is re-checked whenever the screen's size changes (even when the editing bar appears).
+    // If nothing about this page's size changed, leave it alone so objects being dragged aren't rebuilt.
+    if (this.sized && Math.abs(scale - this.scale) < 0.0001 && this.sized.pw === pw && this.sized.ph === ph) return;
+    this.sized = { pw, ph };
+    this.scale = scale;
     this.el.style.width = `${Math.round(pw * scale)}px`;
     this.el.style.height = `${Math.round(ph * scale)}px`;
     this.scaler.style.width = `${pw}px`;
@@ -142,7 +191,8 @@ class PageView {
     this.rendered = true;
     this.redrawPaper();
     this.redrawInk();
-    this.buildItems();
+    // Objects are positioned in page units, so a new canvas size doesn't move them: keep what's there.
+    if (!this.items.childElementCount) this.buildItems();
   }
 
   release() {
@@ -219,6 +269,8 @@ class PageView {
       target.removeEventListener('pointerup', up);
       target.removeEventListener('pointercancel', up);
       this.editor.changed();
+      // A resized shape is redrawn at its new size so its outline stays crisp.
+      if (mode === 'resize' && SHAPE_KINDS.includes(model.kind)) this.buildItems();
     };
     target.addEventListener('pointermove', move);
     target.addEventListener('pointerup', up);
@@ -229,7 +281,19 @@ class PageView {
     return [
       h('div', { class: 'handle move', title: 'Drag to move', onPointerdown: (e) => this.startDrag(e, 'move', el, model) }, '✥'),
       h('div', { class: 'handle resize', title: 'Drag to resize', onPointerdown: (e) => this.startDrag(e, 'resize', el, model, opts) }, '⤡'),
+      h('button', {
+        class: 'handle del', title: 'Delete (Delete key)', 'aria-label': 'Delete', text: '×',
+        onPointerdown: (e) => e.stopPropagation(),
+        onClick: () => this.editor.deleteItem(this, model, type),
+      }),
     ];
+  }
+
+  /** Tilt and see-through, applied to the item on screen. The handles are left upright. */
+  styleItem(el, model) {
+    el.style.transform = model.rotation ? `rotate(${model.rotation}deg)` : '';
+    const body = el.firstElementChild;
+    if (body) body.style.opacity = model.opacity != null && model.opacity < 1 ? String(model.opacity) : '';
   }
 
   frame(model, type, height) {
@@ -323,11 +387,38 @@ class PageView {
           ),
         ),
       );
+    } else if (SHAPE_KINDS.includes(o.kind)) {
+      // One <svg> whose path is the same one the canvas draws, so the page and the editor match.
+      const svg = document.createElementNS(SVG_NS, 'svg');
+      svg.setAttribute('viewBox', `0 0 ${o.width} ${o.height}`);
+      svg.setAttribute('preserveAspectRatio', 'none');
+      svg.setAttribute('class', 'shape');
+      const path = document.createElementNS(SVG_NS, 'path');
+      path.setAttribute('d', shapePath(o.kind, o.width, o.height));
+      path.setAttribute('fill', o.fillHex && o.kind !== 'line' && o.kind !== 'arrow' ? o.fillHex : 'none');
+      path.setAttribute('stroke', o.colorHex);
+      path.setAttribute('stroke-width', String(o.lineWidth || 3));
+      path.setAttribute('stroke-linecap', 'round');
+      path.setAttribute('stroke-linejoin', 'round');
+      path.setAttribute('vector-effect', 'non-scaling-stroke');
+      svg.append(path);
+      body = svg;
     } else {
-      body = h('div', { class: 'stamp', style: { color: o.colorHex, borderColor: o.colorHex, font: objectFont(o) }, text: (o.text || '').toUpperCase() });
+      body = h('div', {
+        class: `stamp ${o.border || 'rounded'}`,
+        style: { color: o.colorHex, borderColor: o.colorHex, font: objectFont(o) },
+        text: (o.text || '').toUpperCase(),
+      });
     }
-    el.append(body, ...this.handles(el, o, 'object', { resizeHeight: o.kind === 'sticky' || o.kind === 'stamp' }));
+    el.append(body, ...this.handles(el, o, 'object', { resizeHeight: o.kind === 'sticky' || o.kind === 'stamp' || SHAPE_KINDS.includes(o.kind) }));
+    if (movableByBody(o)) {
+      body.addEventListener('pointerdown', (e) => {
+        ed.select(this, o, 'object');
+        this.startDrag(e, 'move', el, o);
+      });
+    }
     el.addEventListener('pointerdown', () => ed.select(this, o, 'object'), true);
+    this.styleItem(el, o);
     return el;
   }
 }
@@ -355,6 +446,7 @@ export class Editor {
     this.panning = null;
     this.zoom = null;      // whiteboards only: null means "fit the whole board"
     this.boardFit = 1;
+    this.lastDeleted = null;   // the object just deleted, so "Undo" can put it back
 
     this.build();
     this.renderPages();
@@ -825,11 +917,63 @@ export class Editor {
   }
 
   keyDown(e) {
-    if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z') return;
-    if (['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
-    e.preventDefault();
-    if (e.shiftKey) this.redo();
-    else this.undo();
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      if (e.shiftKey) this.redo();
+      else this.undo();
+      return;
+    }
+    // With something selected in edit mode: Delete removes it, the arrow keys nudge it (Shift for bigger steps).
+    const sel = this.selected;
+    if (!this.editMode || !sel) return;
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault();
+      this.deleteItem(sel.pv, sel.model, sel.type);
+      return;
+    }
+    const step = e.shiftKey ? 10 : 1;
+    const move = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
+    if (move) {
+      e.preventDefault();
+      sel.model.x += move[0];
+      sel.model.y += move[1];
+      const el = sel.pv.items.querySelector(`.item[data-id="${sel.model.id}"]`);
+      if (el) {
+        el.style.left = `${sel.model.x}px`;
+        el.style.top = `${sel.model.y}px`;
+      }
+      this.changed();
+    }
+  }
+
+  /** Removes a selected object or picture. A message offers Undo for a few seconds. */
+  deleteItem(pv, model, type) {
+    const list = type === 'image' ? pv.page.images : pv.page.objects;
+    const index = list.indexOf(model);
+    if (index < 0) return;
+    list.splice(index, 1);
+    this.lastDeleted = { pageId: pv.page.id, type, index, model };
+    this.select(null);
+    pv.buildItems();
+    this.changed();
+    const name = type === 'image' ? 'Picture' : KIND_NAMES[model.kind] || 'Item';
+    toast(`${name} deleted`, 8000, { label: 'Undo', onClick: () => this.restoreDeleted() });
+  }
+
+  restoreDeleted() {
+    const gone = this.lastDeleted;
+    if (!gone) return;
+    const pv = this.views.find((v) => v.page.id === gone.pageId);
+    if (!pv) return;
+    const list = gone.type === 'image' ? pv.page.images : pv.page.objects;
+    list.splice(Math.min(gone.index, list.length), 0, gone.model);
+    this.lastDeleted = null;
+    if (!pv.rendered) pv.render();
+    if (!this.editMode) this.setEditMode(true);
+    else pv.buildItems();
+    this.select(pv, gone.model, gone.type);
+    this.changed();
   }
 
   // ---------- objects and pictures ----------
@@ -858,14 +1002,22 @@ export class Editor {
   }
 
   insertMenu(anchor) {
+    const today = new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
     popMenu(anchor, [
       { label: 'Text box', onClick: () => this.insertObject('text') },
       { label: 'Sticky note', onClick: () => this.insertObject('sticky') },
       { label: 'Checklist', onClick: () => this.insertObject('checklist') },
       { label: 'Table', onClick: () => this.insertObject('table') },
       { divider: true },
-      ...STAMPS.map((s) => ({ label: `Stamp: ${s}`, onClick: () => this.insertObject('stamp', s) })),
-      { label: `Stamp: ${new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}`, onClick: () => this.insertObject('stamp', new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })) },
+      { label: 'Shapes', disabled: true },
+      ...SHAPE_KINDS.map((k) => ({ label: `  ${KIND_NAMES[k]}`, onClick: () => this.insertObject(k) })),
+      { divider: true },
+      { label: 'Stamps', disabled: true },
+      ...STAMPS.map((s) => ({ label: `  ${s}`, onClick: () => this.insertObject('stamp', s) })),
+      { label: `  ${today}`, onClick: () => this.insertObject('stamp', today) },
+      ...this.lib.stamps.slice(0, 8).map((s) => ({ label: `  ★ ${s.name}`, onClick: () => this.placeObject(stampObject(s)) })),
+      { label: '  My stamps…', onClick: () => this.openStampLibrary() },
+      { label: '  Make a custom stamp…', onClick: () => this.openStampEditor(null, null, true) },
       { divider: true },
       { label: 'Picture from this device…', onClick: () => this.fileInput.click() },
       { label: 'Take a photo…', onClick: () => this.cameraInput.click() },
@@ -873,9 +1025,13 @@ export class Editor {
   }
 
   insertObject(kind, text = '') {
+    this.placeObject(makeObject(kind, text));
+  }
+
+  /** Puts a ready-made object on the page being looked at, and selects it. */
+  placeObject(o) {
     const pv = this.activeView();
     if (!pv.rendered) pv.render();
-    const o = makeObject(kind, text);
     const offset = (pv.page.objects.length % 8) * 36;
     // Keep objects inside small pages (A6 is only 397 points wide). Whiteboards are huge, so start in the middle.
     o.width = Math.min(o.width, Math.max(80, pv.pw - 80));
@@ -929,6 +1085,156 @@ export class Editor {
     }
   }
 
+  // ---------- custom stamps ----------
+
+  stampPreview(s) {
+    return h('span', {
+      class: `stamp-mini ${s.border || 'rounded'}`,
+      style: {
+        color: s.colorHex, borderColor: s.colorHex, opacity: String(s.opacity ?? 1), transform: `rotate(${s.rotation || 0}deg)`,
+        font: `${s.bold ? 'bold ' : ''}${Math.min(s.fontSize || 22, 22)}px -apple-system, Helvetica, Arial, sans-serif`,
+      },
+      text: (s.text || '').toUpperCase(),
+    });
+  }
+
+  /** "My stamps": tap one to place it, make new ones, edit or delete old ones. */
+  openStampLibrary() {
+    const list = h('div', { class: 'stamp-list' });
+    let closeDialog = () => {};
+    const render = () => {
+      clear(list);
+      if (!this.lib.stamps.length) {
+        list.append(h('p', { class: 'hint', text: 'No saved stamps yet. Make one, or select a stamp on a page and choose "Save to my stamps".' }));
+      }
+      for (const s of this.lib.stamps) {
+        list.append(h('div', { class: 'stamp-row' },
+          h('button', { class: 'stamp-use', title: 'Place on the page', onClick: () => { closeDialog(); this.placeObject(stampObject(s)); } },
+            this.stampPreview(s), h('span', { class: 'stamp-name', text: s.name })),
+          h('button', { class: 'btn small', text: 'Edit', onClick: () => this.openStampEditor(s, render, false) }),
+          h('button', { class: 'btn small danger', text: 'Delete', onClick: () => { this.lib.deleteStamp(s.id); render(); } })));
+      }
+    };
+    closeDialog = modal('My stamps', (close) => {
+      render();
+      return h('div', { class: 'stack' }, list,
+        h('div', { class: 'row-btns end' },
+          h('button', { class: 'btn', text: 'Make a stamp', onClick: () => this.openStampEditor(null, render, false) }),
+          h('button', { class: 'btn primary', text: 'Done', onClick: close })));
+    });
+  }
+
+  /** Make or change a custom stamp. `insert` places it on the page straight after saving. */
+  openStampEditor(existing, onSaved, insert = false) {
+    const draft = existing ? { ...existing } : {
+      id: uuid(), name: '', text: 'PAID', colorHex: '#C0392B', fontSize: 26, bold: true, border: 'rounded', rotation: -8, opacity: 1,
+    };
+    const previewBox = h('div', { class: 'stamp-preview' });
+    const redraw = () => {
+      clear(previewBox);
+      previewBox.append(this.stampPreview({ ...draft, fontSize: Math.min(draft.fontSize, 34) }));
+    };
+    const textArea = h('textarea', { rows: '2', maxlength: '60', value: draft.text, onInput: () => { draft.text = textArea.value; redraw(); } });
+    const nameInput = h('input', { type: 'text', value: draft.name, maxlength: '40', onInput: () => { draft.name = nameInput.value; } });
+    const colour = h('input', { type: 'color', value: draft.colorHex, onInput: (e) => { draft.colorHex = e.target.value; redraw(); } });
+    const sizeInput = h('input', { type: 'number', min: '12', max: '72', step: '2', value: String(draft.fontSize), onInput: (e) => { draft.fontSize = clamp(Number(e.target.value) || 26, 12, 72); redraw(); } });
+    const bold = h('input', { type: 'checkbox', checked: draft.bold, onChange: (e) => { draft.bold = e.target.checked; redraw(); } });
+    const border = h('select', { onChange: (e) => { draft.border = e.target.value; redraw(); } },
+      BORDERS.map(([v, t]) => h('option', { value: v, text: t, selected: draft.border === v })));
+    const slider = (key, min, max, step, fmt) => {
+      const out = h('span', { class: 'range-val', text: fmt(draft[key]) });
+      const input = h('input', { type: 'range', min, max, step, value: String(draft[key]), onInput: (e) => { draft[key] = Number(e.target.value); out.textContent = fmt(draft[key]); redraw(); } });
+      return h('span', { class: 'range-row' }, input, out);
+    };
+    const field = (t, c) => h('label', { class: 'field' }, t, c);
+    redraw();
+    modal(existing ? 'Edit stamp' : 'Make a stamp', (close) =>
+      h('div', { class: 'stack' }, previewBox,
+        field('Stamp text', textArea), field('Name in your list (optional)', nameInput),
+        h('div', { class: 'row-btns' }, field('Colour', colour), field('Text size', sizeInput), h('label', { class: 'check' }, bold, 'Bold')),
+        field('Border', border),
+        field('Tilt', slider('rotation', -45, 45, 1, (v) => `${v}°`)),
+        field('Opacity', slider('opacity', 0.1, 1, 0.05, (v) => `${Math.round(v * 100)}%`)),
+        h('div', { class: 'row-btns end' },
+          h('button', { class: 'btn', text: 'Cancel', onClick: close }),
+          h('button', { class: 'btn primary', text: 'Save stamp', onClick: () => {
+            if (!draft.text.trim()) return toast('Type the words for the stamp first.');
+            if (!draft.name.trim()) draft.name = draft.text.replace(/\n/g, ' ').trim();
+            const saved = this.lib.saveStamp(draft);
+            close();
+            onSaved?.(saved);
+            if (insert) this.placeObject(stampObject(saved));
+          } }))));
+  }
+
+  // ---------- watermark ----------
+
+  /** A watermark across every page of the note: behind the writing, and in exports and printouts. */
+  openWatermark() {
+    const current = this.note.watermark;
+    const wm = {
+      text: current?.text ?? 'DRAFT', colorHex: current?.colorHex ?? '#8C99B3', opacity: current?.opacity ?? 0.18,
+      angle: current?.angle ?? -35, size: current?.size ?? 120, border: current?.border ?? 'rounded', tiled: current?.tiled ?? false,
+    };
+    let on = true;   // opening this screen means you want one; untick the box to remove it
+    const preview = h('canvas', { class: 'nb-preview', 'aria-hidden': 'true' });
+    const redraw = () => {
+      const base = pageSpec(this.note, 0);
+      const k = Math.min(240 / base.w, 320 / base.h);
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      preview.width = Math.max(1, Math.round(base.w * k * dpr));
+      preview.height = Math.max(1, Math.round(base.h * k * dpr));
+      preview.style.width = `${Math.round(base.w * k)}px`;
+      preview.style.height = `${Math.round(base.h * k)}px`;
+      const ctx = preview.getContext('2d');
+      ctx.setTransform(k * dpr, 0, 0, k * dpr, 0, 0);
+      drawPaper(ctx, {}, { ...base, watermark: on && wm.text.trim() ? { ...wm } : null }, new Map());
+    };
+    const field = (t, c) => h('label', { class: 'field' }, t, c);
+    const slider = (key, min, max, step, fmt) => {
+      const out = h('span', { class: 'range-val', text: fmt(wm[key]) });
+      const input = h('input', { type: 'range', min, max, step, value: String(wm[key]), onInput: (e) => { wm[key] = Number(e.target.value); out.textContent = fmt(wm[key]); redraw(); } });
+      return h('span', { class: 'range-row' }, input, out);
+    };
+    const onBox = h('input', { type: 'checkbox', checked: on, onChange: () => { on = onBox.checked; redraw(); } });
+    const textInput = h('input', { type: 'text', value: wm.text, maxlength: '40', onInput: () => { wm.text = textInput.value; redraw(); } });
+    const swatches = h('div', { class: 'swatch-row' });
+    const renderSwatches = () => {
+      clear(swatches);
+      for (const [name, hex] of WATERMARK_COLOURS) {
+        swatches.append(h('button', { type: 'button', class: `sw${wm.colorHex === hex ? ' on' : ''}`, style: { background: hex }, title: name, 'aria-label': name, onClick: () => { wm.colorHex = hex; renderSwatches(); redraw(); } }));
+      }
+    };
+    const border = h('select', { onChange: (e) => { wm.border = e.target.value; redraw(); } },
+      BORDERS.map(([v, t]) => h('option', { value: v, text: t, selected: wm.border === v })));
+    const tiled = h('input', { type: 'checkbox', checked: wm.tiled, onChange: () => { wm.tiled = tiled.checked; redraw(); } });
+    renderSwatches();
+    redraw();
+    modal('Watermark', (close) =>
+      h('div', { class: 'setup' },
+        h('div', { class: 'setup-form stack' },
+          h('label', { class: 'check' }, onBox, 'Show a watermark on every page'),
+          field('Text', textInput),
+          h('div', { class: 'row-btns' }, WATERMARK_PICKS.map((p) => h('button', { type: 'button', class: 'btn small', text: p, onClick: () => { wm.text = p; textInput.value = p; redraw(); } }))),
+          field('Colour', swatches),
+          field('Border (makes it look like a stamp)', border),
+          field('Strength', slider('opacity', 0.05, 0.6, 0.01, (v) => `${Math.round(v * 100)}%`)),
+          field('Angle', slider('angle', -90, 90, 1, (v) => `${v}°`)),
+          field('Size', slider('size', 30, 300, 5, (v) => String(v))),
+          h('label', { class: 'check' }, tiled, 'Repeat across the page'),
+          h('div', { class: 'row-btns end' },
+            h('button', { class: 'btn', text: 'Cancel', onClick: close }),
+            h('button', { class: 'btn primary', text: 'Apply', onClick: () => {
+              if (on && wm.text.trim()) this.note.watermark = { ...wm, text: wm.text.trim() };
+              else delete this.note.watermark;
+              this.changed();
+              for (const pv of this.views) pv.redrawPaper();
+              close();
+            } }))),
+        h('div', { class: 'setup-preview' }, h('div', { class: 'nb-wrap' }, preview))),
+    { wide: true });
+  }
+
   // ---------- inspector ----------
 
   renderInspector() {
@@ -952,8 +1258,25 @@ export class Editor {
     const size = () =>
       label('Size', h('input', { type: 'number', min: '10', max: '72', step: '2', value: String(o.fontSize), onChange: (e) => { o.fontSize = clamp(Number(e.target.value) || 18, 10, 72); rebuild(); } }));
     const button = (text, fn) => h('button', { class: 'btn small', text, onClick: fn });
+    // Tilt and opacity update the item on screen as the slider moves, without rebuilding it.
+    const range = (text, key, min, max, step, fmt) => {
+      const out = h('span', { class: 'range-val', text: fmt(o[key] ?? (key === 'opacity' ? 1 : 0)) });
+      const input = h('input', {
+        type: 'range', min, max, step, value: String(o[key] ?? (key === 'opacity' ? 1 : 0)), 'aria-label': text,
+        onInput: (e) => {
+          o[key] = Number(e.target.value);
+          out.textContent = fmt(o[key]);
+          const el = pv.items.querySelector(`.item[data-id="${o.id}"]`);
+          if (el) pv.styleItem(el, o);
+          this.changed();
+        },
+      });
+      return h('label', { class: 'field' }, text, h('span', { class: 'range-row' }, input, out));
+    };
+    const tilt = () => range('Tilt', 'rotation', -180, 180, 1, (v) => `${v}°`);
+    const opacity = () => range('Opacity', 'opacity', 0.1, 1, 0.05, (v) => `${Math.round(v * 100)}%`);
 
-    row.push(h('strong', { text: type === 'image' ? 'Picture' : { text: 'Text box', sticky: 'Sticky note', checklist: 'Checklist', table: 'Table', stamp: 'Stamp' }[o.kind] }));
+    row.push(h('strong', { text: type === 'image' ? 'Picture' : KIND_NAMES[o.kind] || 'Object' }));
 
     if (type === 'object') {
       if (o.kind === 'text') {
@@ -968,7 +1291,7 @@ export class Editor {
           colour('colorHex'),
         );
       } else if (o.kind === 'sticky') {
-        row.push(colour('fillHex', 'Paper'), colour('colorHex', 'Text'), size());
+        row.push(colour('fillHex', 'Paper'), colour('colorHex', 'Text'), size(), tilt());
       } else if (o.kind === 'checklist') {
         row.push(
           colour('colorHex'), size(),
@@ -985,8 +1308,27 @@ export class Editor {
         );
       } else if (o.kind === 'stamp') {
         row.push(
-          label('Text', h('input', { type: 'text', value: o.text, maxlength: '30', onInput: (e) => { o.text = e.target.value; this.changed(); }, onChange: rebuild })),
+          label('Text', h('textarea', { rows: '2', maxlength: '60', value: o.text, onInput: (e) => { o.text = e.target.value; this.changed(); }, onChange: rebuild })),
           colour('colorHex'), size(),
+          h('button', { class: `btn small${o.bold ? ' on' : ''}`, 'aria-pressed': String(!!o.bold), text: 'B', title: 'Bold', onClick: () => { o.bold = !o.bold; rebuild(); } }),
+          label('Border', h('select', { onChange: (e) => { o.border = e.target.value; rebuild(); } },
+            BORDERS.map(([v, t]) => h('option', { value: v, text: t, selected: (o.border || 'rounded') === v })))),
+          tilt(), opacity(),
+          button('Save to my stamps', () => {
+            this.lib.saveStamp(stampFromObject(o));
+            toast('Saved to My stamps. Use it again from Insert, then My stamps.');
+          }),
+        );
+      } else if (SHAPE_KINDS.includes(o.kind)) {
+        const fillable = o.kind !== 'line' && o.kind !== 'arrow';
+        row.push(
+          colour('colorHex', 'Line'),
+          label('Width', h('input', { type: 'number', min: '1', max: '14', step: '1', value: String(o.lineWidth || 3), onChange: (e) => { o.lineWidth = clamp(Number(e.target.value) || 3, 1, 14); rebuild(); } })),
+          ...(fillable ? [
+            h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!o.fillHex, onChange: (e) => { o.fillHex = e.target.checked ? (o.fillHex || '#BFD3FF') : null; rebuild(); } }), 'Fill'),
+            o.fillHex ? colour('fillHex', 'Fill colour') : null,
+          ] : []),
+          tilt(), opacity(),
         );
       }
     }
@@ -1004,17 +1346,9 @@ export class Editor {
         this.select(pv, copy, type);
         this.changed();
       }),
-      h('button', {
-        class: 'btn small danger', text: 'Delete',
-        onClick: () => {
-          list.splice(list.indexOf(o), 1);
-          this.select(null);
-          pv.buildItems();
-          this.changed();
-        },
-      }),
+      h('button', { class: 'btn small danger', text: 'Delete', onClick: () => this.deleteItem(pv, o, type) }),
     );
-    this.inspector.append(...row);
+    this.inspector.append(...row.filter(Boolean));
   }
 
   // ---------- menus and export ----------
@@ -1039,6 +1373,7 @@ export class Editor {
       { label: 'Delete this page', danger: true, onClick: () => this.deletePage() },
       { divider: true },
       { label: this.note.pageNumbers ? 'Hide page numbers' : 'Show page numbers', onClick: () => this.togglePageNumbers() },
+      { label: this.note.watermark ? 'Edit watermark…' : 'Add watermark…', onClick: () => this.openWatermark() },
       { divider: true },
       { label: `Template: ${templateTitle(this.note.template)}`, disabled: true },
       ...TEMPLATES.map((t) => ({ label: `  ${t.title}`, onClick: () => this.changeTemplate(t.id) })),

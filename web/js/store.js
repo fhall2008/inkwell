@@ -11,7 +11,7 @@ import { openJson, sealJson, sealBlob, openBlob, toB64Url, randomBytes } from '.
 import { blobCache } from './idb.js';
 import { ApiError } from './api.js';
 
-const KINDS = new Set(['note', 'folders', 'template']);
+const KINDS = new Set(['note', 'folders', 'template', 'stamps']);
 const SAVE_DELAY = 1200;
 const RETRY_DELAY = 10000;
 
@@ -40,6 +40,7 @@ export class Library extends EventTarget {
     this.imageLoads = new Map(); // image id -> Promise
     this.pollTimer = null;
     if (!this.items.has('folders')) this.items.set('folders', this.blank('folders', { v: 1, folders: [] }));
+    if (!this.items.has('stamps')) this.items.set('stamps', this.blank('stamps', { v: 1, stamps: [] }));
   }
 
   blank(kind, data) {
@@ -60,6 +61,34 @@ export class Library extends EventTarget {
 
   get folders() {
     return this.items.get('folders').data.folders;
+  }
+
+  /** The person's saved custom stamps. */
+  get stamps() {
+    return this.items.get('stamps').data.stamps;
+  }
+
+  /** Adds a stamp, or replaces the one with the same id. All fields are always written, as the iPad requires. */
+  saveStamp(stamp) {
+    const full = {
+      id: stamp.id || uuid(), name: stamp.name || stamp.text, text: stamp.text, colorHex: stamp.colorHex || '#C0392B',
+      fontSize: stamp.fontSize || 26, bold: stamp.bold !== false, border: stamp.border || 'rounded',
+      rotation: stamp.rotation ?? 0, opacity: stamp.opacity ?? 1,
+    };
+    const list = this.stamps;
+    const at = list.findIndex((s) => s.id === full.id);
+    if (at >= 0) list[at] = full;
+    else list.push(full);
+    this.touch('stamps');
+    this.emit('stamps');
+    return full;
+  }
+
+  deleteStamp(id) {
+    const data = this.items.get('stamps').data;
+    data.stamps = data.stamps.filter((s) => s.id !== id);
+    this.touch('stamps');
+    this.emit('stamps');
   }
 
   notes() {

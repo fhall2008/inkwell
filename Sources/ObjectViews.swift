@@ -135,6 +135,30 @@ struct ObjectShape: Shape {
     }
 }
 
+/// The outline of a stamp or watermark. Also used to draw it into exports, so they match the screen.
+struct StampBorderShape: Shape {
+    let border: StampBorder
+
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        let outer = r.insetBy(dx: 1.5, dy: 1.5)
+        switch border {
+        case .none:
+            break
+        case .box:
+            p.addRect(outer)
+        case .rounded:
+            p.addRoundedRect(in: outer, cornerSize: CGSize(width: 8, height: 8))
+        case .oval:
+            p.addEllipse(in: outer)
+        case .double:
+            p.addRoundedRect(in: outer, cornerSize: CGSize(width: 8, height: 8))
+            p.addRoundedRect(in: outer.insetBy(dx: 7, dy: 7), cornerSize: CGSize(width: 4, height: 4))
+        }
+        return p
+    }
+}
+
 // MARK: - Object content
 
 struct ObjectContent: View {
@@ -267,8 +291,9 @@ struct ObjectContent: View {
         Text(o.text.uppercased())
             .font(o.swiftUIFont)
             .foregroundStyle(ink)
+            .multilineTextAlignment(.center)
             .frame(width: size.width, height: size.height)
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(ink, lineWidth: 3))
+            .overlay(StampBorderShape(border: o.border).stroke(ink, lineWidth: 3))
     }
 }
 
@@ -286,13 +311,38 @@ struct ObjectChrome: View {
     @State private var drag: CGSize = .zero
     @State private var resize: CGSize = .zero
 
+    /// Shapes and stamps have no text field to get in the way, so they can be dragged from anywhere on them.
+    private var movableByBody: Bool {
+        switch o.kind {
+        case .text, .sticky, .checklist, .table: false
+        default: true
+        }
+    }
+
+    private func moveGesture() -> some Gesture {
+        DragGesture(coordinateSpace: .named("page"))
+            .onChanged { value in
+                if !selected { onSelect() }
+                drag = value.translation
+            }
+            .onEnded { value in
+                o.x += value.translation.width
+                o.y += value.translation.height
+                drag = .zero
+                onChange()
+            }
+    }
+
     var body: some View {
         let width = CGFloat(max(60, o.width)) + resize.width
         let extra: CGFloat = o.resizesHeight ? resize.height : 0
         let height: CGFloat? = o.layoutHeight.map { CGFloat(max(24, $0)) + extra }
 
         ObjectContent(o: $o, size: CGSize(width: width, height: height ?? 0), editable: editable, onChange: onChange)
+            .opacity(o.opacity)
             .frame(width: width, height: height, alignment: .topLeading)
+            .contentShape(Rectangle())
+            .gesture(moveGesture(), including: (editable && movableByBody) ? .all : .subviews)
             .overlay {
                 if editable {
                     Rectangle()
@@ -309,17 +359,22 @@ struct ObjectChrome: View {
                         .frame(width: 44, height: 28)
                         .background(Theme.accent, in: Capsule())
                         .offset(y: -34)
-                        .gesture(
-                            DragGesture(coordinateSpace: .named("page"))
-                                .onChanged { drag = $0.translation }
-                                .onEnded {
-                                    o.x += $0.translation.width
-                                    o.y += $0.translation.height
-                                    drag = .zero
-                                    onChange()
-                                }
-                        )
+                        .gesture(moveGesture())
                         .accessibilityLabel("Drag to move")
+                }
+            }
+            .overlay(alignment: .topLeading) {
+                // A clear, big way to remove the selected object.
+                if editable && selected {
+                    Button(role: .destructive, action: onDelete) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 28))
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, Color.red)
+                    }
+                    .buttonStyle(.plain)
+                    .offset(x: -14, y: -14)
+                    .accessibilityLabel("Delete")
                 }
             }
             .overlay(alignment: .bottomTrailing) {
@@ -349,6 +404,7 @@ struct ObjectChrome: View {
                 Button("Delete", systemImage: "trash", role: .destructive, action: onDelete)
             }
             .allowsHitTesting(editable)
+            .rotationEffect(.degrees(o.rotation))
             .offset(x: o.x + drag.width, y: o.y + drag.height)
     }
 }
@@ -359,6 +415,8 @@ struct ObjectInspector: View {
     @Binding var o: PageObject
     var onDuplicate: () -> Void
     var onDelete: () -> Void
+    /// Offered for stamps: saves this stamp's look so it can be reused from "My stamps".
+    var onSaveStamp: (() -> Void)?
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -393,6 +451,25 @@ struct ObjectInspector: View {
         Stepper("Line \(Int(o.lineWidth))", value: $o.lineWidth, in: 1...14).fixedSize()
     }
 
+    private var tiltControl: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "rotate.right").accessibilityHidden(true)
+            Slider(value: $o.rotation, in: -180...180, step: 1)
+                .frame(width: 110)
+                .accessibilityLabel("Tilt")
+            Text("\(Int(o.rotation))°").monospacedDigit().frame(width: 46, alignment: .leading)
+        }
+    }
+
+    private var opacityControl: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "circle.lefthalf.filled").accessibilityHidden(true)
+            Slider(value: $o.opacity, in: 0.1...1)
+                .frame(width: 90)
+                .accessibilityLabel("Opacity")
+        }
+    }
+
     @ViewBuilder
     private var controls: some View {
         switch o.kind {
@@ -412,6 +489,8 @@ struct ObjectInspector: View {
         case .line, .arrow:
             inkColor
             widthStepper
+            tiltControl
+            opacityControl
         case .rectangle, .ellipse, .triangle, .star:
             inkColor
             widthStepper
@@ -424,11 +503,14 @@ struct ObjectInspector: View {
                 ColorPicker("Fill colour", selection: Binding(get: { Color(hex: fill) }, set: { o.fillHex = $0.hex }), supportsOpacity: false)
                     .labelsHidden()
             }
+            tiltControl
+            opacityControl
         case .sticky:
             ColorPicker("Paper", selection: Binding(get: { Color(hex: o.fillHex ?? "#FFE98A") }, set: { o.fillHex = $0.hex }), supportsOpacity: false)
                 .labelsHidden()
             sizeStepper
             inkColor
+            tiltControl
         case .checklist:
             inkColor
             sizeStepper
@@ -442,11 +524,21 @@ struct ObjectInspector: View {
             Button("+ Column") { o.cells = o.cells.map { $0 + [""] } }
             Button("− Column") { if (o.cells.first?.count ?? 0) > 1 { o.cells = o.cells.map { Array($0.dropLast()) } } }
         case .stamp:
-            TextField("Stamp text", text: $o.text)
+            TextField("Stamp text", text: $o.text, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 170)
             inkColor
             sizeStepper
+            Toggle(isOn: $o.bold) { Image(systemName: "bold") }.toggleStyle(.button)
+            Picker("Border", selection: $o.border) {
+                ForEach(StampBorder.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.menu)
+            tiltControl
+            opacityControl
+            if let onSaveStamp {
+                Button("Save to my stamps", systemImage: "star", action: onSaveStamp)
+            }
         }
     }
 }

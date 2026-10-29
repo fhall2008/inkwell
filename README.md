@@ -11,7 +11,13 @@ iPad Air notes app for Apple Pencil Pro. SwiftUI + PencilKit, iPadOS 17.5+.
 - Export: PDF, Word (.docx), PNG, plain text, RTF, Inkwell backup. Print too.
 - Text, Word and RTF exports use on-device handwriting recognition (Apple Vision)
 - Insert menu: text boxes (font, size, bold, italic, colour, bullets, numbers), sticky notes,
-  checklists, tables, stamps. All move, resize and recolour.
+  checklists, tables, shapes (line, arrow, rectangle, circle, triangle, star) and stamps. Shapes and stamps can be dragged from
+  anywhere on them; select one to tilt it, change its opacity, resize it, or delete it (a red × on the item, the Delete key on
+  the web, or the bar at the bottom), with Undo for a few seconds afterwards.
+- Custom stamps: choose the words, colour, text size, border (none, box, rounded, oval, double), tilt and opacity. They are saved
+  under "My stamps" and sync between devices.
+- Watermarks: Pages menu, then Add watermark. Text such as DRAFT or CONFIDENTIAL across every page, behind your writing, with
+  colour, strength, angle, size, an optional stamp border, and a repeat-across-the-page option. Shows in exports and printouts.
 - Dictation (mic button) and "Handwriting to text" (••• menu) turn speech and handwriting into text boxes
 - Pages (••• menu): thumbnails, drag to reorder, duplicate, insert blank, delete
 - Import a PDF or Word (.docx) file from the library to annotate it

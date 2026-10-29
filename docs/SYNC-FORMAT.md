@@ -22,6 +22,7 @@ reference implementation; the iPad app must read and write the same shapes.
 | note UUID (uppercase) | `note` | the note document below |
 | `folders` | `folders` | `{ "v": 1, "folders": [{ "id": "...", "name": "..." }] }` |
 | `templates` | `template` | `{ "v": 1, "templates": [...] }` (iPad custom templates; the web leaves it alone) |
+| `stamps` | `stamps` | `{ "v": 1, "stamps": [ { "id", "name", "text", "colorHex", "fontSize", "bold", "border", "rotation", "opacity" } ] }` the person's saved custom stamps. Every field must be present. |
 | `img-<random>` | `image` | raw JPEG or PNG bytes |
 | `envelope` | `envelope` | see above |
 
@@ -59,8 +60,17 @@ reference implementation; the iPad app must read and write the same shapes.
   `blank`, `grid` or `dots`, drawn at a fixed 28-point spacing over the whole board.
 - Templates are designed for a 794-wide page and are scaled to the page's width, so A5, A6 and B5 look the same as A4.
 - `template` values: `blank ruled grid dots cornell meeting planner sermon onePoint twoPoint face figure colourWheel valueScale thirds isometric`.
-- Object `kind` values the web draws: `text sticky checklist table stamp`. Unknown kinds are skipped, not deleted.
-  Object fields match the iPad `PageObject` struct. `items` is `[{id, text, done}]`; `cells` is a grid of strings.
+- Object `kind` values: `text sticky checklist table stamp` and the shapes `line arrow rectangle ellipse triangle star`.
+  Unknown kinds are skipped, not deleted. Object fields match the iPad `PageObject` struct. `items` is
+  `[{id, text, done}]`; `cells` is a grid of strings.
+- Every object may also carry `rotation` (degrees, tilt around the object's centre), `opacity` (0.1 to 1) and, for stamps,
+  `border` (`none box rounded oval double`; missing means `rounded`). Missing `rotation` is 0 and missing `opacity` is 1.
+  Stamp `text` may have several lines. Shapes use `lineWidth`, `colorHex` and optional `fillHex` (not for `line` and `arrow`),
+  and are drawn inside the object's `width` x `height` box: line and arrow run along the middle of the box, a star is
+  inscribed in the smaller side, and an arrow has a 16 x 10 point head.
+- A note may have a `watermark`: `{ text, colorHex, opacity, angle, size, border, tiled }` (all present). It is drawn on every page
+  above the paper and template but behind pictures, objects and ink. Text is upper-cased; `border` uses the stamp border names;
+  `tiled` repeats it in staggered rows. A whiteboard has none.
 - Stroke `ink`: `pen`, `pencil`, `marker`/`highlighter` (semi-transparent). The iPad should map other PencilKit inks to
   the nearest of these when exporting and keep the original ink name in an extra `inkType` field so it can restore it.
 - Stroke points are `[x, y, width]` where width is the line width in page points at that point.

@@ -29,16 +29,33 @@ final class Store: ObservableObject {
     @Published var folders: [Folder] = []
     @Published var notes: [Note] = []
     @Published var customTemplates: [CustomTemplate] = []
+    @Published var customStamps: [CustomStamp] = []
 
     /// The sync engine listens here. They are not called for changes that arrive from the server.
     var onNoteSaved: ((UUID) -> Void)?
     var onNoteDeleted: ((UUID) -> Void)?
     var onFoldersChanged: (() -> Void)?
+    var onStampsChanged: (() -> Void)?
 
     private let io = DispatchQueue(label: "inkwell.io", qos: .utility)
     private struct Meta: Codable {
         var folders: [Folder]
         var customTemplates: [CustomTemplate]
+        var customStamps: [CustomStamp] = []
+
+        init(folders: [Folder], customTemplates: [CustomTemplate], customStamps: [CustomStamp]) {
+            self.folders = folders
+            self.customTemplates = customTemplates
+            self.customStamps = customStamps
+        }
+
+        // Saved before custom stamps existed: the stamps key is missing.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            folders = try c.decode([Folder].self, forKey: .folders)
+            customTemplates = try c.decode([CustomTemplate].self, forKey: .customTemplates)
+            customStamps = try c.decodeIfPresent([CustomStamp].self, forKey: .customStamps) ?? []
+        }
     }
 
     init() { load() }
@@ -50,6 +67,7 @@ final class Store: ObservableObject {
         if let data = try? Data(contentsOf: Paths.meta), let meta = try? decoder.decode(Meta.self, from: data) {
             folders = meta.folders
             customTemplates = meta.customTemplates
+            customStamps = meta.customStamps
         }
         let files = (try? FileManager.default.contentsOfDirectory(at: Paths.notes, includingPropertiesForKeys: nil)) ?? []
         notes = files.filter { $0.pathExtension == "json" }
@@ -61,7 +79,7 @@ final class Store: ObservableObject {
     }
 
     private func saveMeta() {
-        let meta = Meta(folders: folders, customTemplates: customTemplates)
+        let meta = Meta(folders: folders, customTemplates: customTemplates, customStamps: customStamps)
         io.async { try? JSONEncoder().encode(meta).write(to: Paths.meta, options: .atomic) }
     }
 
@@ -81,6 +99,25 @@ final class Store: ObservableObject {
     }
 
     func note(_ id: UUID) -> Note? { notes.first { $0.id == id } }
+
+    // MARK: Custom stamps
+
+    func saveStamp(_ stamp: CustomStamp) {
+        if let i = customStamps.firstIndex(where: { $0.id == stamp.id }) { customStamps[i] = stamp } else { customStamps.append(stamp) }
+        saveMeta()
+        onStampsChanged?()
+    }
+
+    func deleteStamp(_ stamp: CustomStamp) {
+        customStamps.removeAll { $0.id == stamp.id }
+        saveMeta()
+        onStampsChanged?()
+    }
+
+    func applyRemoteStamps(_ remote: [CustomStamp]) {
+        customStamps = remote
+        saveMeta()
+    }
 
     // MARK: Changes from the server (no sync hooks, modified date kept)
 

@@ -4,7 +4,7 @@ const KEEP_VERSIONS = 10;
 const MAX_BYTES = 30 * 1024 * 1024;
 const MAX_USER_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB of stored versions per user
 const ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
-const KINDS = new Set(["note", "image", "folders", "envelope", "template"]);
+const KINDS = new Set(["note", "image", "folders", "envelope", "template", "stamps"]);
 
 interface FileRow {
   id: string;

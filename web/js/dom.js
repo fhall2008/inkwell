@@ -27,13 +27,23 @@ export function clear(el) {
   return el;
 }
 
-export function toast(message, ms = 4000) {
+/** A short message. `action` adds a button, for example { label: 'Undo', onClick }. */
+export function toast(message, ms = 4000, action = null) {
   let host = document.getElementById('toasts');
   if (!host) {
     host = h('div', { id: 'toasts', 'aria-live': 'polite' });
     document.body.append(host);
   }
-  const el = h('div', { class: 'toast', text: message });
+  const el = h('div', { class: 'toast' }, h('span', { text: message }));
+  if (action) {
+    el.append(h('button', {
+      class: 'toast-action', text: action.label,
+      onClick: () => {
+        el.remove();
+        action.onClick();
+      },
+    }));
+  }
   host.append(el);
   setTimeout(() => el.remove(), ms);
 }

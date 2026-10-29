@@ -57,12 +57,123 @@ function fillWrapped(ctx, text, x, y, width, o) {
   wrapLines(ctx, text, width).forEach((line, i) => ctx.fillText(line, x, y + i * lineHeight));
 }
 
+// ---------- shapes and stamp borders (shared by the canvas and the on-screen editor) ----------
+
+export const SHAPE_KINDS = ['line', 'arrow', 'rectangle', 'ellipse', 'triangle', 'star'];
+export const BORDERS = [['none', 'None'], ['box', 'Box'], ['rounded', 'Rounded'], ['oval', 'Oval'], ['double', 'Double']];
+
+const round2 = (n) => Math.round(n * 100) / 100;
+
+/** An SVG path for a shape inside a w x h box. The canvas draws it with Path2D and the editor with <svg>. */
+export function shapePath(kind, w, h) {
+  const mx = round2(w / 2);
+  const my = round2(h / 2);
+  switch (kind) {
+    case 'line':
+      return `M0 ${my}L${w} ${my}`;
+    case 'arrow':
+      return `M0 ${my}L${w} ${my}M${round2(w - 16)} ${round2(my - 10)}L${w} ${my}L${round2(w - 16)} ${round2(my + 10)}`;
+    case 'rectangle':
+      return `M6 0H${round2(w - 6)}Q${w} 0 ${w} 6V${round2(h - 6)}Q${w} ${h} ${round2(w - 6)} ${h}H6Q0 ${h} 0 ${round2(h - 6)}V6Q0 0 6 0Z`;
+    case 'ellipse':
+      return `M0 ${my}A${mx} ${my} 0 1 0 ${w} ${my}A${mx} ${my} 0 1 0 0 ${my}Z`;
+    case 'triangle':
+      return `M${mx} 0L${w} ${h}L0 ${h}Z`;
+    case 'star': {
+      const outer = Math.min(w, h) / 2;
+      const inner = outer * 0.4;
+      const pts = [];
+      for (let i = 0; i < 10; i++) {
+        const r = i % 2 === 0 ? outer : inner;
+        const a = -Math.PI / 2 + (i * Math.PI) / 5;
+        pts.push(`${round2(w / 2 + r * Math.cos(a))} ${round2(h / 2 + r * Math.sin(a))}`);
+      }
+      return `M${pts.join('L')}Z`;
+    }
+    default:
+      return '';
+  }
+}
+
+/** Strokes a stamp's outline inside the box x, y, w, h. */
+function strokeStampBorder(ctx, border, x, y, w, h) {
+  if (border === 'none') return;
+  const ox = x + 1.5, oy = y + 1.5, ow = w - 3, oh = h - 3;
+  const rounded = (a, b, c, d, r) => {
+    ctx.beginPath();
+    ctx.roundRect(a, b, c, d, r);
+    ctx.stroke();
+  };
+  if (border === 'box') {
+    ctx.strokeRect(ox, oy, ow, oh);
+  } else if (border === 'oval') {
+    ctx.beginPath();
+    ctx.ellipse(x + w / 2, y + h / 2, ow / 2, oh / 2, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  } else {
+    rounded(ox, oy, ow, oh, 8);
+    if (border === 'double') rounded(ox + 7, oy + 7, ow - 14, oh - 14, 4);
+  }
+}
+
+/** A watermark across a whole page: behind everything, like "DRAFT" or "CONFIDENTIAL". */
+export function drawWatermark(ctx, wm, w, h) {
+  const label = (wm.text || '').trim().toUpperCase();
+  if (!label) return;
+  ctx.save();
+  ctx.font = `bold ${wm.size || 120}px ${FAMILIES.sans}`;
+  const textW = ctx.measureText(label).width;
+  const textH = (wm.size || 120) * 1.2;
+  const border = wm.border || 'none';
+  const pad = border === 'none' ? 0 : (wm.size || 120) * 0.25;
+  const boxW = textW + pad * 2;
+  const boxH = textH + pad * 1.2;
+
+  const one = (cx, cy, fit) => {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(((wm.angle ?? -35) * Math.PI) / 180);
+    ctx.scale(fit, fit);
+    ctx.globalAlpha = wm.opacity ?? 0.18;
+    ctx.fillStyle = ctx.strokeStyle = wm.colorHex || '#8C99B3';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, 0);
+    if (pad) {
+      ctx.lineWidth = Math.max(3, (wm.size || 120) / 14);
+      strokeStampBorder(ctx, border, -boxW / 2, -boxH / 2, boxW, boxH);
+    }
+    ctx.restore();
+  };
+
+  if (wm.tiled) {
+    const stepX = boxW + (wm.size || 120);
+    const stepY = boxH * 2.2;
+    let row = 0;
+    for (let y = -stepY; y < h + stepY; y += stepY, row++) {
+      for (let x = (row % 2 === 0 ? 0 : stepX / 2) - stepX; x < w + stepX; x += stepX) one(x, y, 1);
+    }
+  } else {
+    one(w / 2, h / 2, Math.min(1, (w * 0.92) / Math.max(boxW, 1)));   // shrink it if it would run off the page
+  }
+  ctx.restore();
+}
+
 export function drawObject(ctx, o) {
   const ink = o.colorHex || '#1B2430';
   const size = o.fontSize || 18;
   ctx.save();
   ctx.fillStyle = ink;
   ctx.strokeStyle = ink;
+  if (o.opacity != null && o.opacity < 1) ctx.globalAlpha = o.opacity;
+  if (o.rotation) {
+    // Tilt around the middle of the object, like the on-screen view.
+    const cx = o.x + o.width / 2;
+    const cy = o.y + layoutHeight(o) / 2;
+    ctx.translate(cx, cy);
+    ctx.rotate((o.rotation * Math.PI) / 180);
+    ctx.translate(-cx, -cy);
+  }
 
   switch (o.kind) {
     case 'text':
@@ -142,19 +253,39 @@ export function drawObject(ctx, o) {
       break;
     }
 
-    case 'stamp':
+    case 'stamp': {
       ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.roundRect(o.x + 1.5, o.y + 1.5, o.width - 3, o.height - 3, 8);
-      ctx.stroke();
+      strokeStampBorder(ctx, o.border ?? 'rounded', o.x, o.y, o.width, o.height);
       ctx.font = objectFont(o);
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText((o.text || '').toUpperCase(), o.x + o.width / 2, o.y + o.height / 2);
+      const lines = (o.text || '').toUpperCase().split('\n');
+      const lh = size * 1.2;
+      lines.forEach((line, i) => ctx.fillText(line, o.x + o.width / 2, o.y + o.height / 2 - (lines.length * lh) / 2 + lh * (i + 0.5)));
       break;
+    }
+
+    case 'line':
+    case 'arrow':
+    case 'rectangle':
+    case 'ellipse':
+    case 'triangle':
+    case 'star': {
+      ctx.translate(o.x, o.y);
+      const path = new Path2D(shapePath(o.kind, o.width, o.height));
+      if (o.fillHex && o.kind !== 'line' && o.kind !== 'arrow') {
+        ctx.fillStyle = o.fillHex;
+        ctx.fill(path);
+      }
+      ctx.lineWidth = o.lineWidth || 3;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke(path);
+      break;
+    }
 
     default:
-      break; // unknown kinds (for example shapes from older notes) are skipped
+      break; // unknown kinds from a newer app are skipped, not deleted
   }
   ctx.restore();
 }
@@ -171,6 +302,7 @@ export function pageSpec(note, index = 0) {
     whiteboard,
     numbers: !!note.pageNumbers && !whiteboard,
     number: index + 1,
+    watermark: whiteboard ? null : note.watermark || null,
   };
 }
 
@@ -186,6 +318,8 @@ export function drawPaper(ctx, page, spec, images, { objects = true, pictures = 
   } else {
     drawTemplateFitted(ctx, spec.template, spec.w, spec.h);
   }
+  // The watermark sits above the paper but behind pictures, objects and ink.
+  if (spec.watermark) drawWatermark(ctx, spec.watermark, spec.w, spec.h);
   if (spec.numbers) {
     ctx.save();
     ctx.font = '11px -apple-system, Helvetica, Arial, sans-serif';

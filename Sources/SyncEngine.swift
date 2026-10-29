@@ -22,6 +22,7 @@ final class SyncEngine: ObservableObject {
         var deletedNotes: Set<String> = []
         var foldersDirty = false
         var uploadedImages: Set<String> = []
+        var stampsDirty: Bool?                   // optional so state saved by older versions still loads
     }
 
     private var state = State()
@@ -42,6 +43,7 @@ final class SyncEngine: ObservableObject {
         store.onNoteSaved = { [weak self] id in self?.noteChanged(id) }
         store.onNoteDeleted = { [weak self] id in self?.noteDeleted(id) }
         store.onFoldersChanged = { [weak self] in self?.foldersChanged() }
+        store.onStampsChanged = { [weak self] in self?.stampsChanged() }
     }
 
     func start(api: SyncAPI, master: Data, user: SyncUser) {
@@ -102,6 +104,13 @@ final class SyncEngine: ObservableObject {
         schedule()
     }
 
+    private func stampsChanged() {
+        guard api != nil else { return }
+        state.stampsDirty = true
+        saveState()
+        schedule()
+    }
+
     /// Anything never uploaded, or edited since the last sync (for example while signed out).
     private func markUnsynced() {
         guard let store else { return }
@@ -110,6 +119,7 @@ final class SyncEngine: ObservableObject {
             state.dirtyNotes.insert(note.id.uuidString)
         }
         if !store.folders.isEmpty && state.versions["folders"] == nil { state.foldersDirty = true }
+        if !store.customStamps.isEmpty && state.versions["stamps"] == nil { state.stampsDirty = true }
         saveState()
     }
 
@@ -217,6 +227,26 @@ final class SyncEngine: ObservableObject {
                 state.versions["folders"] = change.version
             }
 
+        case "stamps":
+            if (state.versions["stamps"] ?? 0) >= change.version, change.deleted == 0 { return }
+            do {
+                let (sealed, version) = try await api.getBlob("stamps", version: change.version)
+                let wire = try SyncCrypto.openJSON(WireStamps.self, from: sealed, key: master, kind: "stamps", id: "stamps")
+                if state.stampsDirty == true {
+                    // Both sides changed: keep every stamp from either, and upload the combined list next.
+                    var merged = wire.stamps
+                    for mine in store.customStamps where !merged.contains(where: { $0.id == mine.id }) { merged.append(mine) }
+                    store.applyRemoteStamps(merged)
+                } else {
+                    store.applyRemoteStamps(wire.stamps)
+                }
+                state.versions["stamps"] = version
+            } catch let error as SyncError where !error.isNotFound {
+                throw error
+            } catch {
+                state.versions["stamps"] = change.version
+            }
+
         default:
             break   // pictures are fetched with the note that uses them
         }
@@ -261,6 +291,19 @@ final class SyncEngine: ObservableObject {
                 saveState()
             } catch {
                 state.foldersDirty = true
+                throw error
+            }
+        }
+
+        if state.stampsDirty == true {
+            state.stampsDirty = false
+            do {
+                let sealed = try SyncCrypto.sealJSON(WireStamps(stamps: store.customStamps), key: master, kind: "stamps", id: "stamps")
+                let result = try await api.putBlob("stamps", kind: "stamps", body: sealed, baseVersion: state.versions["stamps"])
+                state.versions["stamps"] = result.version
+                saveState()
+            } catch {
+                state.stampsDirty = true
                 throw error
             }
         }

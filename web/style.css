@@ -133,7 +133,8 @@ input[type='range'] { width: 110px; accent-color: var(--accent); }
 .menu button { border: 0; background: transparent; text-align: left; padding: 0 12px; min-height: 42px; border-radius: 8px; white-space: pre; }
 .menu button:hover:not(:disabled) { background: var(--paper); }
 #toasts { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); display: grid; gap: 8px; z-index: 100; width: min(520px, calc(100vw - 24px)); }
-.toast { background: var(--ink); color: #fff; padding: 12px 16px; border-radius: 12px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25); }
+.toast { background: var(--ink); color: #fff; padding: 12px 16px; border-radius: 12px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25); display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.toast-action { border: 0; background: transparent; color: #9fb7ff; font-weight: 700; min-height: 32px; padding: 0 8px; }
 .overlay { position: fixed; inset: 0; background: rgba(27, 36, 48, 0.45); z-index: 60; display: grid; place-items: center; padding: 16px; overflow: auto; }
 .modal { width: min(480px, 100%); max-height: calc(100dvh - 32px); overflow: auto; background: var(--paper); border-radius: 18px; padding: 20px; display: grid; gap: 14px; }
 .modal.wide { width: min(780px, 100%); }
@@ -195,7 +196,23 @@ input[type='range'] { width: 110px; accent-color: var(--accent); }
 .cl-text { flex: 1; min-width: 0; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; font: inherit; color: inherit; outline: none; }
 .table { display: grid; width: 100%; }
 .table input { min-width: 0; min-height: 0; padding: 0 6px; border: 1px solid; border-radius: 0; background: transparent; font: inherit; color: inherit; outline: none; }
-.stamp { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; border: 3px solid; border-radius: 8px; overflow: hidden; }
+.stamp, .stamp-mini { display: flex; align-items: center; justify-content: center; border: 3px solid; border-radius: 8px; overflow: hidden; white-space: pre-line; text-align: center; line-height: 1.2; }
+.stamp { width: 100%; height: 100%; cursor: grab; user-select: none; }
+.stamp-mini { display: inline-flex; padding: 6px 14px; width: auto; height: auto; }
+.stamp.none, .stamp-mini.none { border: 0; }
+.stamp.box, .stamp-mini.box { border-radius: 0; }
+.stamp.oval, .stamp-mini.oval { border-radius: 50%; }
+.stamp.double, .stamp-mini.double { border-style: double; border-width: 6px; }
+svg.shape { display: block; width: 100%; height: 100%; overflow: visible; cursor: grab; touch-action: none; }
+.handle.del { top: -16px; left: -16px; width: 30px; height: 30px; border: 0; border-radius: 50%; background: var(--danger); font-size: 20px; line-height: 1; cursor: pointer; }
+.stamp-list { display: grid; gap: 10px; max-height: 50vh; overflow: auto; }
+.stamp-row { display: flex; align-items: center; gap: 8px; }
+.stamp-use { flex: 1; display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 6px 12px; border: 1px solid var(--hair); border-radius: var(--radius); background: #fff; text-align: left; }
+.stamp-name { color: var(--muted); font-size: 14px; }
+.stamp-preview { display: grid; place-items: center; min-height: 120px; background: #fff; border: 1px solid var(--hair); border-radius: var(--radius); }
+.range-row { display: flex; align-items: center; gap: 8px; }
+.range-row input[type='range'] { width: 120px; }
+.range-val { font-size: 13px; color: var(--muted); min-width: 38px; font-weight: 500; }
 
 /* ---------- small screens ---------- */
 @media (max-width: 720px) {
