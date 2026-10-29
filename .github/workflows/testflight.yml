@@ -46,14 +46,14 @@ jobs:
           KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
           ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
         run: |
+          # The archive is built unsigned. Signing happens in the export step with Apple's cloud-managed
+          # distribution certificate, so no new development certificate is created on every run
+          # (that used up the account's certificate limit).
           xcodebuild archive \
             -project Inkwell.xcodeproj -scheme Inkwell \
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/Inkwell.xcarchive" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey.p8" \
-            -authenticationKeyID "$KEY_ID" \
-            -authenticationKeyIssuerID "$ISSUER_ID" \
+            CODE_SIGNING_ALLOWED=NO \
             DEVELOPMENT_TEAM="$TEAM_ID" \
             CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
             INKWELL_SERVER_URL="${{ vars.INKWELL_API_URL }}"
