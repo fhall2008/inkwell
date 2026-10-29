@@ -66,7 +66,7 @@ final class AccountManager: ObservableObject {
         let api = try makeAPI()
         let address = email.trimmingCharacters(in: .whitespaces).lowercased()
         let pre = try await api.prelogin(email: address)
-        let stretched = try SyncCrypto.stretch(password: password, salt: pre.salt, iterations: pre.iterations)
+        let stretched = try await Self.stretched(password: password, salt: pre.salt, iterations: pre.iterations)
         let session = try await api.login(email: address, loginKey: stretched.loginKey)
         api.token = session.token
 
@@ -88,7 +88,7 @@ final class AccountManager: ObservableObject {
         let address = email.trimmingCharacters(in: .whitespaces).lowercased()
         let pre = try await api.prelogin(email: address)
         let salt = SyncCrypto.newSalt()
-        let stretched = try SyncCrypto.stretch(password: password, salt: salt, iterations: pre.iterations)
+        let stretched = try await Self.stretched(password: password, salt: salt, iterations: pre.iterations)
         let made = try SyncCrypto.createEnvelope(encKey: stretched.encKey)
         let session = try await api.register(invite: invite.trimmingCharacters(in: .whitespaces), email: address,
                                              salt: salt, loginKey: stretched.loginKey)
@@ -108,7 +108,7 @@ final class AccountManager: ObservableObject {
         let address = email.trimmingCharacters(in: .whitespaces).lowercased()
         let pre = try await api.prelogin(email: address)
         let salt = SyncCrypto.newSalt()
-        let stretched = try SyncCrypto.stretch(password: newPassword, salt: salt, iterations: pre.iterations)
+        let stretched = try await Self.stretched(password: newPassword, salt: salt, iterations: pre.iterations)
         let session = try await api.reset(invite: code.trimmingCharacters(in: .whitespaces), email: address,
                                           salt: salt, loginKey: stretched.loginKey)
         api.token = session.token
@@ -135,9 +135,9 @@ final class AccountManager: ObservableObject {
         try Self.checkPassword(new, confirm: confirm)
         guard let api, let master else { return }
         let pre = try await api.prelogin(email: email)
-        let old = try SyncCrypto.stretch(password: current, salt: pre.salt, iterations: pre.iterations)
+        let old = try await Self.stretched(password: current, salt: pre.salt, iterations: pre.iterations)
         let salt = SyncCrypto.newSalt()
-        let next = try SyncCrypto.stretch(password: new, salt: salt, iterations: pre.iterations)
+        let next = try await Self.stretched(password: new, salt: salt, iterations: pre.iterations)
         guard let found = try await fetchEnvelope(api) else { throw SyncCrypto.CryptoError.corrupt }
         // Keep both passwords able to unlock until the change has gone through, in case the connection drops.
         let pending = try SyncCrypto.addPending(found.envelope, master: master, newEncKey: next.encKey)
@@ -169,6 +169,13 @@ final class AccountManager: ObservableObject {
     }
 
     // MARK: Helpers
+
+    /// Stretching the password takes about a second, so it runs off the main thread to keep the screen responsive.
+    private static func stretched(password: String, salt: String, iterations: Int) async throws -> SyncCrypto.Stretched {
+        try await Task.detached(priority: .userInitiated) {
+            try SyncCrypto.stretch(password: password, salt: salt, iterations: iterations)
+        }.value
+    }
 
     private func activate(api: SyncAPI, master: Data, user: SyncUser, expires: Double, save: Bool) {
         self.api = api
