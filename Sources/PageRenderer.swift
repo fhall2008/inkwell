@@ -23,7 +23,7 @@ enum PageRenderer {
         let rect = CGRect(origin: .zero, size: size)
         let number = (note.pages.firstIndex { $0.id == page.id } ?? 0) + 1
 
-        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+        let rendered = UIGraphicsImageRenderer(size: size, format: format).image { _ in
             UIColor(hex: note.paperHex).setFill()
             UIRectFill(rect)
 
@@ -64,6 +64,14 @@ enum PageRenderer {
                 }
             }
         }
+        return unitScale(rendered)
+    }
+
+    /// iOS 16 aborts (a CoreUI assertion) when SwiftUI shows a UIImage whose scale is below 1, which is what
+    /// small thumbnails are. Re-wrap the same pixels at scale 1. Callers that draw it resizable don't care.
+    static func unitScale(_ image: UIImage) -> UIImage {
+        guard image.scale < 1, let cg = image.cgImage else { return image }
+        return UIImage(cgImage: cg, scale: 1, orientation: .up)
     }
 
     private static func drawPageNumber(_ number: Int, in size: CGSize) {

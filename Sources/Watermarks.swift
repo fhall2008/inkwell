@@ -62,7 +62,7 @@ enum WatermarkRenderer {
         if let hit = cache.object(forKey: key) { return hit }
         let format = UIGraphicsImageRendererFormat.default()
         format.scale = min(2, 3000 / max(size.width, size.height))
-        let image = UIGraphicsImageRenderer(size: size, format: format).image { _ in draw(wm, in: size) }
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { _ in draw(wm, in: size) }.unitScaled
         cache.setObject(image, forKey: key)
         return image
     }

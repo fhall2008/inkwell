@@ -87,7 +87,7 @@ enum TemplateKind: String, Codable, CaseIterable, Identifiable {
             UIColor(hex: paperHex).setFill()
             UIRectFill(CGRect(origin: .zero, size: size))
             draw(size: size)
-        }
+        }.unitScaled
         Self.cache.setObject(img, forKey: key)
         return img
     }

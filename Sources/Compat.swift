@@ -68,3 +68,8 @@ extension EmptyState where Actions == EmptyView {
         self.init(title: title, systemImage: systemImage, message: message) { EmptyView() }
     }
 }
+
+extension UIImage {
+    /// iOS 16 crashes when SwiftUI shows an image whose scale is below 1. Re-wrap the same pixels at scale 1.
+    var unitScaled: UIImage { PageRenderer.unitScale(self) }
+}
