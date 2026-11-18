@@ -49,6 +49,7 @@ jobs:
           # The archive is built unsigned. Signing happens in the export step with Apple's cloud-managed
           # distribution certificate, so no new development certificate is created on every run
           # (that used up the account's certificate limit).
+          set -o pipefail
           xcodebuild archive \
             -project Inkwell.xcodeproj -scheme Inkwell \
             -destination 'generic/platform=iOS' \
@@ -56,7 +57,11 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             DEVELOPMENT_TEAM="$TEAM_ID" \
             CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
-            INKWELL_SERVER_URL="${{ vars.INKWELL_API_URL }}"
+            INKWELL_SERVER_URL="${{ vars.INKWELL_API_URL }}" 2>&1 | tee "$RUNNER_TEMP/archive.log"
+
+      - name: Show compiler errors
+        if: failure()
+        run: grep -E "error:" "$RUNNER_TEMP/archive.log" | sort -u || true
 
       - name: Export and upload to App Store Connect
         env:

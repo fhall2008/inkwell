@@ -174,7 +174,7 @@ struct NoteEditorView: View {
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
+        ToolbarItem(placement: .navigationBarLeading) {
             Button { saveTask?.cancel(); store.update(note); dismiss() } label: {
                 Label("Library", systemImage: "chevron.left")
             }
@@ -190,7 +190,7 @@ struct NoteEditorView: View {
                     .font(.caption2).foregroundStyle(.secondary)
             }
         }
-        ToolbarItemGroup(placement: .topBarTrailing) {
+        ToolbarItemGroup(placement: .navigationBarTrailing) {
             Button { InkSession.shared.undo() } label: { Image(systemName: "arrow.uturn.backward") }
                 .accessibilityLabel("Undo")
             Button { InkSession.shared.redo() } label: { Image(systemName: "arrow.uturn.forward") }
@@ -209,7 +209,7 @@ struct NoteEditorView: View {
                 ActionButton("Table", systemImage: ObjectKind.table.icon) { addObject(.table) }
                 ActionMenu("Shapes", systemImage: "square.on.circle") {
                     ForEach(ObjectKind.shapes) { kind in
-                        Button(kind.title, systemImage: kind.icon) { addObject(kind) }
+                        ActionButton(kind.title, systemImage: kind.icon) { addObject(kind) }
                     }
                 }
                 ActionMenu("Stamp", systemImage: ObjectKind.stamp.icon) {
@@ -263,12 +263,12 @@ struct NoteEditorView: View {
                     }
                 }
                 ActionButton("Handwriting to text", systemImage: "text.viewfinder") { convertHandwriting() }
-                Button(note.isWhiteboard ? "Change background" : "Change template", systemImage: "square.grid.2x2") { showTemplateMenu = true }
+                ActionButton(note.isWhiteboard ? "Change background" : "Change template", systemImage: "square.grid.2x2") { showTemplateMenu = true }
                 if !note.isWhiteboard {
                     Toggle(isOn: Binding(get: { note.pageNumbers }, set: { note.pageNumbers = $0; scheduleSave() })) {
                         Label("Page numbers", systemImage: "number")
                     }
-                    Button(note.watermark == nil ? "Add watermark…" : "Edit watermark…", systemImage: "drop.halffull") {
+                    ActionButton(note.watermark == nil ? "Add watermark…" : "Edit watermark…", systemImage: "drop.halffull") {
                         showWatermark = true
                     }
                     ActionButton("Save page as template", systemImage: "square.and.arrow.down") {
@@ -648,7 +648,7 @@ struct PlacedImageView: View {
         }
         .contentShape(Rectangle())
         .gesture(
-            DragGesture(coordinateSpace: .named("page"))
+            DragGesture(coordinateSpace: CoordinateSpace.named("page"))
                 .onChanged { drag = $0.translation }
                 .onEnded {
                     placed.x += $0.translation.width

@@ -320,7 +320,7 @@ struct ObjectChrome: View {
     }
 
     private func moveGesture() -> some Gesture {
-        DragGesture(coordinateSpace: .named("page"))
+        DragGesture(coordinateSpace: CoordinateSpace.named("page"))
             .onChanged { value in
                 if !selected { onSelect() }
                 drag = value.translation
@@ -386,7 +386,7 @@ struct ObjectChrome: View {
                         .background(Theme.accent, in: Circle())
                         .offset(x: 16, y: 16)
                         .gesture(
-                            DragGesture(coordinateSpace: .named("page"))
+                            DragGesture(coordinateSpace: CoordinateSpace.named("page"))
                                 .onChanged { resize = $0.translation }
                                 .onEnded {
                                     o.width = max(60, o.width + $0.translation.width)
