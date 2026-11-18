@@ -70,7 +70,7 @@ struct TemplatePickerView: View {
                 }
 
                 HStack {
-                    Text("Selected: ").foregroundStyle(.secondary) + Text(selectedName).bold()
+                    Text("Selected: ").foregroundColor(.secondary) + Text(selectedName).bold()
                     Spacer()
                     Button("Create note", action: create).buttonStyle(.borderedProminent).controlSize(.large)
                 }
