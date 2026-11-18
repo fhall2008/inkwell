@@ -18,6 +18,8 @@ struct NoteEditorView: View {
     @State private var jumpTo: UUID?
     @State private var alertText: String?
     @State private var saveTask: Task<Void, Never>?
+    @State private var unsavedEdits = false     // an edit is waiting for the 0.8 s save timer
+    @State private var reloadToken = UUID()     // changing this rebuilds the pages from `note`
     @State private var presenting = false
     @State private var showStampLibrary = false
     @State private var showStampEditor = false
@@ -80,6 +82,7 @@ struct NoteEditorView: View {
                                 .id(page.id)
                             }
                         }
+                        .id(reloadToken)
                         .padding(.vertical, 24)
                         .padding(.horizontal, note.isWhiteboard ? 24 : 0)
                         .frame(maxWidth: .infinity)
@@ -162,8 +165,10 @@ struct NoteEditorView: View {
             }
         }
         .onChange(of: editMode) { on in if !on { selectedID = nil } }
+        .onReceive(store.remoteNoteApplied) { id in adoptRemoteChange(id) }
         .onDisappear {
             saveTask?.cancel()
+            unsavedEdits = false
             store.update(note)
             InkSession.shared.hide()
             dictation.cancel()
@@ -344,11 +349,25 @@ struct NoteEditorView: View {
 
     private func scheduleSave() {
         saveTask?.cancel()
+        unsavedEdits = true
         saveTask = Task {
             try? await Task.sleep(for: .seconds(0.8))
             guard !Task.isCancelled else { return }
             store.update(note)
+            unsavedEdits = false
         }
+    }
+
+    /// Another device changed this note while it is open here. Without this, the next save from this
+    /// screen would silently overwrite their change with our stale copy.
+    private func adoptRemoteChange(_ id: UUID) {
+        guard id == note.id else { return }
+        // Edited here in the last moment too: keep ours, like the sync engine does (theirs stays in server history).
+        guard !unsavedEdits, let newer = store.note(id) else { return }
+        note = newer
+        activePageID = nil
+        selectedID = nil
+        reloadToken = UUID()   // PKCanvasView only reads its drawing once, so rebuild the pages
     }
 
     // MARK: Pages

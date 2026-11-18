@@ -28,6 +28,7 @@ Guidelines:
 - Be honest: if something was not tested or is a guess, say so.
 
 ## Other conventions
+- **Never commit or push without asking David first** (a hook also reminds of this). Make the edits, show what changed, then ask.
 - Work on the `david` branch, not `main`, unless told otherwise.
 - The app is built by GitHub Actions (no Mac available). Nothing can be compiled locally, so be careful and say so when a change is untested.
 - Minimum iOS is 16. Use the stand-ins in `Sources/Compat.swift` instead of iOS 17-only APIs.

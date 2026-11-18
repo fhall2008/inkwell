@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 enum Paths {
     static let root: URL = {
@@ -36,6 +37,10 @@ final class Store: ObservableObject {
     var onNoteDeleted: ((UUID) -> Void)?
     var onFoldersChanged: (() -> Void)?
     var onStampsChanged: (() -> Void)?
+
+    /// Fires (with the note's id) when a newer version of a note arrives from the server,
+    /// so an editor that has that note open can pick it up instead of overwriting it later.
+    let remoteNoteApplied = PassthroughSubject<UUID, Never>()
 
     private let io = DispatchQueue(label: "inkwell.io", qos: .utility)
     private struct Meta: Codable {
@@ -124,6 +129,7 @@ final class Store: ObservableObject {
     func applyRemote(_ note: Note) {
         if let i = notes.firstIndex(where: { $0.id == note.id }) { notes[i] = note } else { notes.append(note) }
         write(note)
+        remoteNoteApplied.send(note.id)
     }
 
     func removeRemote(_ id: UUID) {
