@@ -2,7 +2,7 @@ name: Inkwell
 options:
   bundleIdPrefix: au.com.neurofaith
   deploymentTarget:
-    iOS: "17.5"   # Apple Pencil Pro squeeze and barrel roll need iPadOS 17.5+
+    iOS: "16.0"   # Apple Pencil Pro squeeze and barrel roll only work on iPadOS 17.5+; older Pencils and iOS versions work without them
 settings:
   base:
     SWIFT_VERSION: "5.9" # test

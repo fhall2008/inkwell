@@ -30,9 +30,9 @@ struct PageManagerSheet: View {
                         Button("Blank after") { insertBlank(after: index) }.tint(.gray)
                     }
                     .contextMenu {
-                        Button("Duplicate page", systemImage: "plus.square.on.square") { duplicate(index) }
-                        Button("Insert blank page after", systemImage: "doc.badge.plus") { insertBlank(after: index) }
-                        Button("Delete page", systemImage: "trash", role: .destructive) { delete(IndexSet(integer: index)) }
+                        ActionButton("Duplicate page", systemImage: "plus.square.on.square") { duplicate(index) }
+                        ActionButton("Insert blank page after", systemImage: "doc.badge.plus") { insertBlank(after: index) }
+                        ActionButton("Delete page", systemImage: "trash", role: .destructive) { delete(IndexSet(integer: index)) }
                             .disabled(note.pages.count < 2)
                     }
                 }

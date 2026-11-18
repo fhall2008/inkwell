@@ -48,7 +48,7 @@ struct TemplatePickerView: View {
                                 card(title: t.name, image: t.base.image, selected: choice == .custom(t.id))
                                     .onTapGesture { choice = .custom(t.id) }
                                     .contextMenu {
-                                        Button("Delete template", systemImage: "trash", role: .destructive) {
+                                        ActionButton("Delete template", systemImage: "trash", role: .destructive) {
                                             store.delete(t)
                                         }
                                     }
@@ -61,10 +61,10 @@ struct TemplatePickerView: View {
                         }
                     }
                     if tab == .mine && store.customTemplates.isEmpty {
-                        ContentUnavailableView(
+                        EmptyState(
                             "No saved templates",
                             systemImage: "square.on.square",
-                            description: Text("In any note, open the ••• menu and choose Save page as template.")
+                            message: "In any note, open the ••• menu and choose Save page as template."
                         )
                     }
                 }

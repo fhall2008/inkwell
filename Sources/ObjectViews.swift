@@ -184,7 +184,7 @@ struct ObjectContent: View {
         Group {
             if editable {
                 TextField("Type here", text: $o.text, axis: .vertical)
-                    .onChange(of: o.text) { onChange() }
+                    .onChange(of: o.text) { _ in onChange() }
             } else {
                 Text(o.formattedText)
             }
@@ -213,7 +213,7 @@ struct ObjectContent: View {
             Group {
                 if editable {
                     TextField("Note", text: $o.text, axis: .vertical)
-                        .onChange(of: o.text) { onChange() }
+                        .onChange(of: o.text) { _ in onChange() }
                 } else {
                     Text(o.text)
                 }
@@ -239,7 +239,7 @@ struct ObjectContent: View {
                     .buttonStyle(.plain)
                     if editable {
                         TextField("Item", text: $item.text)
-                            .onChange(of: item.text) { onChange() }
+                            .onChange(of: item.text) { _ in onChange() }
                     } else {
                         Text(item.text).strikethrough(item.done)
                     }
@@ -400,8 +400,8 @@ struct ObjectChrome: View {
             }
             .simultaneousGesture(TapGesture().onEnded { if editable { onSelect() } })
             .contextMenu {
-                Button("Duplicate", systemImage: "plus.square.on.square", action: onDuplicate)
-                Button("Delete", systemImage: "trash", role: .destructive, action: onDelete)
+                ActionButton("Duplicate", systemImage: "plus.square.on.square", action: onDuplicate)
+                ActionButton("Delete", systemImage: "trash", role: .destructive, action: onDelete)
             }
             .allowsHitTesting(editable)
             .rotationEffect(.degrees(o.rotation))
@@ -537,7 +537,7 @@ struct ObjectInspector: View {
             tiltControl
             opacityControl
             if let onSaveStamp {
-                Button("Save to my stamps", systemImage: "star", action: onSaveStamp)
+                ActionButton("Save to my stamps", systemImage: "star", action: onSaveStamp)
             }
         }
     }

@@ -113,11 +113,11 @@ struct LibraryView: View {
                         .badge(store.notes.filter { $0.folderID == folder.id }.count)
                         .tag(SidebarItem.folder(folder.id))
                         .contextMenu {
-                            Button("Rename", systemImage: "pencil") {
+                            ActionButton("Rename", systemImage: "pencil") {
                                 folderName = folder.name
                                 renaming = folder
                             }
-                            Button("Delete folder", systemImage: "trash", role: .destructive) {
+                            ActionButton("Delete folder", systemImage: "trash", role: .destructive) {
                                 if selection == .folder(folder.id) { selection = .all }
                                 store.delete(folder)
                             }
@@ -140,10 +140,10 @@ struct LibraryView: View {
             }
             .padding(24)
             if visibleNotes.isEmpty {
-                ContentUnavailableView(
+                EmptyState(
                     search.isEmpty ? "No notes yet" : "No matches",
                     systemImage: "pencil.and.scribble",
-                    description: Text(search.isEmpty ? "Tap New note to start writing with Apple Pencil." : "Try a different title.")
+                    message: search.isEmpty ? "Tap New note to start writing with Apple Pencil." : "Try a different title."
                 )
                 .padding(.top, 80)
             }
@@ -210,14 +210,14 @@ struct NoteCard: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
-            Menu("Move to folder", systemImage: "folder") {
+            ActionMenu("Move to folder", systemImage: "folder") {
                 Button("No folder") { store.move(note, to: nil) }
                 ForEach(store.folders) { folder in
                     Button(folder.name) { store.move(note, to: folder.id) }
                 }
             }
-            Button("Duplicate", systemImage: "plus.square.on.square") { store.duplicate(note) }
-            Button("Delete", systemImage: "trash", role: .destructive) { store.delete(note) }
+            ActionButton("Duplicate", systemImage: "plus.square.on.square") { store.duplicate(note) }
+            ActionButton("Delete", systemImage: "trash", role: .destructive) { store.delete(note) }
         }
     }
 }

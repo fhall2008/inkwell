@@ -97,11 +97,11 @@ struct StampLibrarySheet: View {
         NavigationStack {
             Group {
                 if store.customStamps.isEmpty {
-                    ContentUnavailableView {
-                        Label("No saved stamps yet", systemImage: "seal")
-                    } description: {
-                        Text("Make your own: choose the words, colour, border and tilt. Tap Make a stamp to start.")
-                    } actions: {
+                    EmptyState(
+                        title: "No saved stamps yet",
+                        systemImage: "seal",
+                        message: "Make your own: choose the words, colour, border and tilt. Tap Make a stamp to start."
+                    ) {
                         Button("Make a stamp") { creating = true }.buttonStyle(.borderedProminent)
                     }
                 } else {
@@ -126,8 +126,8 @@ struct StampLibrarySheet: View {
                                 Button { editing = stamp } label: { Label("Edit", systemImage: "pencil") }.tint(Theme.accent)
                             }
                             .contextMenu {
-                                Button("Edit", systemImage: "pencil") { editing = stamp }
-                                Button("Delete", systemImage: "trash", role: .destructive) { store.deleteStamp(stamp) }
+                                ActionButton("Edit", systemImage: "pencil") { editing = stamp }
+                                ActionButton("Delete", systemImage: "trash", role: .destructive) { store.deleteStamp(stamp) }
                             }
                         }
                     }

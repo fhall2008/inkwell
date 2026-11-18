@@ -86,18 +86,18 @@ struct NoteEditorView: View {
                         .frame(minHeight: note.isWhiteboard ? geo.size.height : nil)
                     }
                     .simultaneousGesture(
-                        MagnifyGesture()
+                        MagnificationGesture()
                             .onChanged { value in
                                 let base = pinchBase ?? scale
                                 pinchBase = base
-                                zoom = min(4, max(0.08, base * value.magnification))
+                                zoom = min(4, max(0.08, base * value))
                             }
                             .onEnded { _ in pinchBase = nil },
                         including: note.isWhiteboard ? .gesture : .none
                     )
                     .onAppear { boardFit = min(1, min(fitWidth, fitHeight)) }
-                    .onChange(of: geo.size) { _, _ in boardFit = min(1, min(fitWidth, fitHeight)) }
-                    .onChange(of: jumpTo) { _, id in
+                    .onChange(of: geo.size) { _ in boardFit = min(1, min(fitWidth, fitHeight)) }
+                    .onChange(of: jumpTo) { id in
                         guard let id else { return }
                         withAnimation { proxy.scrollTo(id, anchor: .top) }
                         jumpTo = nil
@@ -152,7 +152,7 @@ struct NoteEditorView: View {
         .alert("Inkwell", isPresented: Binding(get: { alertText != nil }, set: { if !$0 { alertText = nil } })) {
             Button("OK") {}
         } message: { Text(alertText ?? "") }
-        .onChange(of: photoItem) { _, item in
+        .onChange(of: photoItem) { item in
             guard let item else { return }
             Task {
                 if let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) {
@@ -161,7 +161,7 @@ struct NoteEditorView: View {
                 photoItem = nil
             }
         }
-        .onChange(of: editMode) { _, on in if !on { selectedID = nil } }
+        .onChange(of: editMode) { on in if !on { selectedID = nil } }
         .onDisappear {
             saveTask?.cancel()
             store.update(note)
@@ -185,7 +185,7 @@ struct NoteEditorView: View {
                     .font(.system(.headline, design: .serif))
                     .multilineTextAlignment(.center)
                     .frame(width: 320)
-                    .onChange(of: note.title) { scheduleSave() }
+                    .onChange(of: note.title) { _ in scheduleSave() }
                 Text(subtitle)
                     .font(.caption2).foregroundStyle(.secondary)
             }
@@ -203,16 +203,16 @@ struct NoteEditorView: View {
                 .accessibilityLabel("Take photo")
 
             Menu {
-                Button("Text box", systemImage: ObjectKind.text.icon) { addObject(.text) }
-                Button("Sticky note", systemImage: ObjectKind.sticky.icon) { addObject(.sticky) }
-                Button("Checklist", systemImage: ObjectKind.checklist.icon) { addObject(.checklist) }
-                Button("Table", systemImage: ObjectKind.table.icon) { addObject(.table) }
-                Menu("Shapes", systemImage: "square.on.circle") {
+                ActionButton("Text box", systemImage: ObjectKind.text.icon) { addObject(.text) }
+                ActionButton("Sticky note", systemImage: ObjectKind.sticky.icon) { addObject(.sticky) }
+                ActionButton("Checklist", systemImage: ObjectKind.checklist.icon) { addObject(.checklist) }
+                ActionButton("Table", systemImage: ObjectKind.table.icon) { addObject(.table) }
+                ActionMenu("Shapes", systemImage: "square.on.circle") {
                     ForEach(ObjectKind.shapes) { kind in
                         Button(kind.title, systemImage: kind.icon) { addObject(kind) }
                     }
                 }
-                Menu("Stamp", systemImage: ObjectKind.stamp.icon) {
+                ActionMenu("Stamp", systemImage: ObjectKind.stamp.icon) {
                     ForEach(Self.stamps, id: \.self) { s in Button(s) { addObject(.stamp, text: s) } }
                     Button(Date.now.formatted(date: .abbreviated, time: .omitted)) {
                         addObject(.stamp, text: Date.now.formatted(date: .abbreviated, time: .omitted))
@@ -224,8 +224,8 @@ struct NoteEditorView: View {
                         }
                     }
                     Divider()
-                    Button("My stamps…", systemImage: "star") { showStampLibrary = true }
-                    Button("Make a custom stamp…", systemImage: "plus") { showStampEditor = true }
+                    ActionButton("My stamps…", systemImage: "star") { showStampLibrary = true }
+                    ActionButton("Make a custom stamp…", systemImage: "plus") { showStampEditor = true }
                 }
             } label: { Image(systemName: "plus.square.on.square") }
                 .accessibilityLabel("Insert")
@@ -251,18 +251,18 @@ struct NoteEditorView: View {
             }
 
             Menu {
-                Button("Present", systemImage: "play.rectangle") {
+                ActionButton("Present", systemImage: "play.rectangle") {
                     editMode = false
                     presenting = true
                 }
                 if !note.isWhiteboard {
-                    Button("Pages", systemImage: "square.stack") { showPages = true }
-                    Button("Add page", systemImage: "plus.square") {
+                    ActionButton("Pages", systemImage: "square.stack") { showPages = true }
+                    ActionButton("Add page", systemImage: "plus.square") {
                         note.pages.append(NotePage())
                         scheduleSave()
                     }
                 }
-                Button("Handwriting to text", systemImage: "text.viewfinder") { convertHandwriting() }
+                ActionButton("Handwriting to text", systemImage: "text.viewfinder") { convertHandwriting() }
                 Button(note.isWhiteboard ? "Change background" : "Change template", systemImage: "square.grid.2x2") { showTemplateMenu = true }
                 if !note.isWhiteboard {
                     Toggle(isOn: Binding(get: { note.pageNumbers }, set: { note.pageNumbers = $0; scheduleSave() })) {
@@ -271,11 +271,11 @@ struct NoteEditorView: View {
                     Button(note.watermark == nil ? "Add watermark…" : "Edit watermark…", systemImage: "drop.halffull") {
                         showWatermark = true
                     }
-                    Button("Save page as template", systemImage: "square.and.arrow.down") {
+                    ActionButton("Save page as template", systemImage: "square.and.arrow.down") {
                         templateName = ""
                         showSaveTemplate = true
                     }
-                    Button("Delete page", systemImage: "trash", role: .destructive) { deleteActivePage() }
+                    ActionButton("Delete page", systemImage: "trash", role: .destructive) { deleteActivePage() }
                         .disabled(note.pages.count < 2)
                 }
             } label: { Image(systemName: "ellipsis.circle") }
@@ -658,10 +658,10 @@ struct PlacedImageView: View {
                 }
         )
         .simultaneousGesture(
-            MagnifyGesture()
-                .onChanged { pinch = $0.magnification }
+            MagnificationGesture()
+                .onChanged { pinch = $0 }
                 .onEnded {
-                    let m = $0.magnification
+                    let m = $0
                     placed.x -= placed.width * (m - 1) / 2
                     placed.y -= placed.height * (m - 1) / 2
                     placed.width *= m
@@ -671,7 +671,7 @@ struct PlacedImageView: View {
                 }
         )
         .contextMenu {
-            Button("Delete image", systemImage: "trash", role: .destructive, action: onDelete)
+            ActionButton("Delete image", systemImage: "trash", role: .destructive, action: onDelete)
         }
         .allowsHitTesting(editable)
         .position(x: placed.x + placed.width / 2 + drag.width, y: placed.y + placed.height / 2 + drag.height)

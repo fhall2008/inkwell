@@ -52,7 +52,7 @@ struct AuthView: View {
             .navigationBarTitleDisplayMode(.inline)
         }
         .interactiveDismissDisabled(account.pendingRecoveryKey != nil)
-        .onChange(of: account.state) { _, new in
+        .onChange(of: account.state) { new in
             if new == .signedIn && account.pendingRecoveryKey == nil { dismiss() }
         }
         .onAppear { error = account.notice }
@@ -71,7 +71,7 @@ struct AuthView: View {
                     ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
-                .onChange(of: mode) { error = nil }
+                .onChange(of: mode) { _ in error = nil }
 
                 switch mode {
                 case .signIn:

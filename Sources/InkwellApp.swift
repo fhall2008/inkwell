@@ -23,7 +23,7 @@ struct InkwellApp: App {
                     account.restore()
                 }
         }
-        .onChange(of: scenePhase) { _, phase in
+        .onChange(of: scenePhase) { phase in
             if phase == .active { sync.syncNow() }
         }
     }

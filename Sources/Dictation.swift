@@ -23,7 +23,7 @@ final class Dictation: ObservableObject {
                     self.errorText = "Allow Speech Recognition for Inkwell in Settings."
                     return
                 }
-                AVAudioApplication.requestRecordPermission { granted in
+                AVAudioSession.sharedInstance().requestRecordPermission { granted in
                     Task { @MainActor in
                         guard granted else {
                             self.errorText = "Allow Microphone access for Inkwell in Settings."
